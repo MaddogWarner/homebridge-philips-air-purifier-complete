@@ -14,7 +14,7 @@
  * Only aiocoap and pycryptodomex need to be installed (done by postinstall.sh).
  */
 
-const { spawn, execSync } = require('node:child_process');
+const { spawn, execFileSync } = require('node:child_process');
 const readline = require('node:readline');
 const path = require('node:path');
 const fs = require('node:fs');
@@ -58,6 +58,14 @@ const MODE_TO_SPEED = {
 
 // Restart backoff delays in ms
 const RESTART_DELAYS = [5000, 10000, 30000, 60000];
+const PYTHON_MIN_VERSION = '3.12';
+// Keep the version tuple in PYTHON_RUNTIME_CHECK in sync with PYTHON_MIN_VERSION above.
+const PYTHON_RUNTIME_CHECK = `
+import sys
+if sys.version_info < (3, 12):
+    raise SystemExit(1)
+import aiocoap, Cryptodome
+`;
 
 module.exports = (api) => {
   api.registerAccessory('PhilipsAirPurifier', PhilipsAirPurifierAccessory);
@@ -142,7 +150,9 @@ class DaemonHandler {
             }
             resolve(response.connected);
           }
-        } catch (_) {}
+        } catch (_error) {
+          // Ignore non-JSON daemon output while waiting for the ready message.
+        }
       };
 
       this.rl.on('line', readyHandler);
@@ -195,7 +205,7 @@ class DaemonHandler {
             else reject(new Error(message.error || 'Command failed'));
           }
       }
-    } catch (_) {
+    } catch (_error) {
       this.log.debug(`Failed to parse daemon message: ${line}`);
     }
   }
@@ -289,23 +299,32 @@ class PhilipsAirPurifierAccessory {
   findPython(pluginDir) {
     const candidates = [
       path.join(pluginDir, '.venv', 'bin', 'python3'),
+      path.join(pluginDir, '.venv', 'bin', 'python3.12'),
       path.join(pluginDir, 'venv', 'bin', 'python3'),
+      path.join(pluginDir, 'venv', 'bin', 'python3.12'),
+      '/opt/homebrew/bin/python3.12',
+      '/usr/local/bin/python3.12',
+      '/usr/bin/python3.12',
+      'python3.12',
       '/usr/bin/python3',
       '/usr/local/bin/python3',
       'python3',
     ];
 
     for (const pythonPath of candidates) {
-      if (!fs.existsSync(pythonPath) && pythonPath !== 'python3') continue;
+      const isCommandName = !pythonPath.includes(path.sep);
+      if (!isCommandName && !fs.existsSync(pythonPath)) continue;
       try {
-        // Check that CoAP and crypto deps are installed — aioairctrl is bundled
-        execSync(`${pythonPath} -c "import aiocoap, Cryptodome"`, { stdio: 'ignore' });
-        this.log.debug(`Found Python with required dependencies: ${pythonPath}`);
+        // Check Python version plus CoAP and crypto deps. aioairctrl is bundled.
+        execFileSync(pythonPath, ['-c', PYTHON_RUNTIME_CHECK], { stdio: 'ignore' });
+        this.log.debug(`Found Python ${PYTHON_MIN_VERSION}+ with required dependencies: ${pythonPath}`);
         return pythonPath;
-      } catch (_) {}
+      } catch (_error) {
+        // Try the next candidate; this one is missing the required runtime or modules.
+      }
     }
 
-    this.log.warn('Could not find Python with aiocoap and pycryptodomex installed. Run: bash postinstall.sh');
+    this.log.warn(`Could not find Python ${PYTHON_MIN_VERSION}+ with aiocoap and pycryptodomex installed. Run: bash postinstall.sh`);
     return 'python3';
   }
 
@@ -324,6 +343,11 @@ class PhilipsAirPurifierAccessory {
     }
     if (path.isAbsolute(pythonPath) && !fs.existsSync(pythonPath)) {
       throw new Error(`pythonPath does not exist: "${pythonPath}"`);
+    }
+    try {
+      execFileSync(pythonPath, ['-c', PYTHON_RUNTIME_CHECK], { stdio: 'ignore' });
+    } catch (_error) {
+      throw new Error(`pythonPath must point to Python ${PYTHON_MIN_VERSION}+ with aiocoap and pycryptodomex installed: "${pythonPath}"`);
     }
   }
 

@@ -6,6 +6,26 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [2.0.1] — 2026-05-18
+
+### Breaking Changes
+
+- Raised the supported Node.js runtime to Node.js 24 or newer.
+- Raised the supported Python runtime to Python 3.12 or newer.
+
+### Changes
+
+- Updated the installer to find Python 3.12+, create/recreate the plugin virtual environment with that runtime, and verify the runtime before reporting success.
+- Added a `preinstall` check that fails npm install early when Node.js 24+ or Python 3.12+ is not available.
+- Replaced the old `aiocoap==0.4.1` pin with `aiocoap>=0.4.17,<0.5` and added an explicit `pycryptodomex>=3.23,<4` range for Python 3.12 compatibility.
+- Replaced shell-based Python dependency probing in `index.js` with `execFileSync()` argument-based execution, improving compatibility with paths containing spaces and reducing shell injection risk.
+- Added Python runtime validation for user-supplied `pythonPath` values.
+- Updated development lint tooling to ESLint 9 flat config for modern Node.js compatibility.
+- Updated README requirements, compatibility notes, CLI examples, and Homebridge UI schema text for Node.js 24 and Python 3.12+.
+- Added OpenAI Codex as a contributor.
+
+---
+
 ## [1.0.1] — 2026-05-17
 
 ### Changes

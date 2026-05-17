@@ -1,7 +1,7 @@
 {
   "name": "homebridge-philips-air-purifier-complete",
-  "version": "1.0.1",
-  "description": "Homebridge plugin for Philips Air Purifier with bundled CoAP control library — no separate Python package install required",
+  "version": "2.0.1",
+  "description": "Homebridge plugin for Philips Air Purifier with bundled CoAP control library and Python 3.12+/Node.js 24 support",
   "main": "index.js",
   "keywords": [
     "homebridge-plugin",
@@ -11,10 +11,14 @@
     "coap"
   ],
   "engines": {
-    "node": ">=18.0.0",
+    "node": ">=24.0.0",
     "homebridge": ">=2.0.0"
   },
   "author": "MadDogWarner",
+  "contributors": [
+    "MadDogWarner",
+    "OpenAI Codex"
+  ],
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -25,19 +29,18 @@
   },
   "dependencies": {},
   "devDependencies": {
-    "eslint": "^8.57.0",
-    "eslint-config-standard": "^17.1.0",
-    "eslint-plugin-import": "^2.29.1",
-    "eslint-plugin-n": "^16.6.2",
-    "eslint-plugin-promise": "^6.6.0",
+    "@eslint/js": "^9.39.1",
+    "eslint": "^9.39.1",
+    "globals": "^16.5.0",
     "prettier": "^3.2.5"
   },
   "peerDependencies": {
     "homebridge": ">=2.0.0"
   },
   "scripts": {
+    "preinstall": "bash preinstall.sh",
     "postinstall": "bash postinstall.sh",
-    "lint": "eslint . --ext .js",
+    "lint": "eslint .",
     "format": "prettier -w ."
   }
 }

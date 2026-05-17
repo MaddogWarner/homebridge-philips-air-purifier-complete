@@ -26,7 +26,7 @@
         "type": "string",
         "required": false,
         "placeholder": "Auto-detected",
-        "description": "Path to Python 3 with aiocoap and pycryptodomex installed. Leave blank to use the plugin's bundled virtual environment (recommended)."
+        "description": "Path to Python 3.12 or newer with aiocoap and pycryptodomex installed. Leave blank to use the plugin's bundled virtual environment (recommended)."
       }
     }
   },

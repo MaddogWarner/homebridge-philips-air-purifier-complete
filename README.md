@@ -12,7 +12,7 @@
 
 Control your Philips Air Purifier from Apple HomeKit via Homebridge — **with no separate Python package install required**.
 
-This plugin bundles the [aioairctrl](https://github.com/betaboon/aioairctrl) CoAP library directly. Installing the plugin is all you need; the Python environment is set up automatically.
+This plugin bundles the [aioairctrl](https://github.com/betaboon/aioairctrl) CoAP library directly. Installing the plugin is all you need; the Python environment is set up automatically for Python 3.12 or newer.
 
 ---
 
@@ -36,19 +36,26 @@ This plugin bundles the [aioairctrl](https://github.com/betaboon/aioairctrl) CoA
 | Requirement | Version |
 |-------------|---------|
 | [Homebridge](https://homebridge.io) | >= 2.0.0 |
-| Node.js | >= 18.0.0 |
-| Python 3 | >= 3.8 |
+| Node.js | >= 24.0.0 |
+| Python 3 | >= 3.12 |
 | Your Philips Air Purifier's **IP address** | — |
 
-Python 3 must be installed on the system running Homebridge. On most platforms:
+Python 3.12 or newer must be installed on the system running Homebridge. On most platforms:
 
 ```bash
 # macOS
-brew install python3
+brew install python@3.12
 
 # Raspberry Pi / Ubuntu / Debian
-sudo apt install python3 python3-venv
+sudo apt install python3.12 python3.12-venv
 ```
+
+The install hook creates a plugin-local virtual environment and installs:
+
+| Python package | Supported range |
+|----------------|-----------------|
+| `aiocoap` | `>=0.4.17,<0.5` |
+| `pycryptodomex` | `>=3.23,<4` |
 
 ---
 
@@ -63,13 +70,15 @@ sudo apt install python3 python3-venv
 
 The plugin automatically sets up a Python virtual environment and installs its CoAP dependencies during install. No extra steps needed.
 
+The npm `preinstall` check fails early if Node.js 24+ or Python 3.12+ is not available on the host.
+
 ### Via npm
 
 ```bash
 npm install -g homebridge-philips-air-purifier-complete
 ```
 
-If the automatic setup fails (e.g., Python 3 wasn't installed yet), re-run it manually:
+If the automatic setup fails (e.g., Python 3.12+ wasn't installed yet), re-run it manually:
 
 ```bash
 bash $(npm root -g)/homebridge-philips-air-purifier-complete/postinstall.sh
@@ -101,7 +110,7 @@ Or configure via the Homebridge UI — just fill in the **Name** and **IP Addres
 |--------|----------|---------|-------------|
 | `name` | Yes | — | Name shown in HomeKit |
 | `host` | Yes | — | IPv4 address of your air purifier |
-| `pythonPath` | No | Auto-detected | Path to Python 3 with `aiocoap` and `pycryptodomex` installed. Leave blank to use the plugin's bundled virtual environment. |
+| `pythonPath` | No | Auto-detected | Path to Python 3.12 or newer with `aiocoap` and `pycryptodomex` installed. Leave blank to use the plugin's bundled virtual environment. |
 
 ---
 
@@ -114,7 +123,7 @@ Before configuring Homebridge, you can verify the plugin can reach your device:
 source $(npm root -g)/homebridge-philips-air-purifier-complete/.venv/bin/activate
 
 # Run a sensor query
-python3 $(npm root -g)/homebridge-philips-air-purifier-complete/philips_air_api.py 192.168.1.100 sensors
+python $(npm root -g)/homebridge-philips-air-purifier-complete/philips_air_api.py 192.168.1.100 sensors
 ```
 
 You should see a JSON payload with PM2.5, filter life, temperature, and so on. CoAP can be flaky on the first connection — re-run if you get a timeout.
@@ -166,19 +175,19 @@ State cache ──► HomeKit characteristics
 The bundled Python script can be used standalone for diagnostics:
 
 ```bash
-python3 philips_air_api.py 192.168.1.100 sensors
-python3 philips_air_api.py 192.168.1.100 status
-python3 philips_air_api.py 192.168.1.100 power on
-python3 philips_air_api.py 192.168.1.100 power off
-python3 philips_air_api.py 192.168.1.100 mode auto
-python3 philips_air_api.py 192.168.1.100 mode sleep
-python3 philips_air_api.py 192.168.1.100 mode medium
-python3 philips_air_api.py 192.168.1.100 mode turbo
-python3 philips_air_api.py 192.168.1.100 light 0      # off
-python3 philips_air_api.py 192.168.1.100 light 115    # dim
-python3 philips_air_api.py 192.168.1.100 light 123    # bright
-python3 philips_air_api.py 192.168.1.100 childlock on
-python3 philips_air_api.py 192.168.1.100 childlock off
+python3.12 philips_air_api.py 192.168.1.100 sensors
+python3.12 philips_air_api.py 192.168.1.100 status
+python3.12 philips_air_api.py 192.168.1.100 power on
+python3.12 philips_air_api.py 192.168.1.100 power off
+python3.12 philips_air_api.py 192.168.1.100 mode auto
+python3.12 philips_air_api.py 192.168.1.100 mode sleep
+python3.12 philips_air_api.py 192.168.1.100 mode medium
+python3.12 philips_air_api.py 192.168.1.100 mode turbo
+python3.12 philips_air_api.py 192.168.1.100 light 0      # off
+python3.12 philips_air_api.py 192.168.1.100 light 115    # dim
+python3.12 philips_air_api.py 192.168.1.100 light 123    # bright
+python3.12 philips_air_api.py 192.168.1.100 childlock on
+python3.12 philips_air_api.py 192.168.1.100 childlock off
 ```
 
 ---
@@ -191,7 +200,11 @@ python3 philips_air_api.py 192.168.1.100 childlock off
 - Check Homebridge logs for daemon error messages
 
 **Python setup failed during install**
-- Ensure Python 3 and `python3-venv` are installed, then re-run `bash postinstall.sh`
+- Ensure Python 3.12+ and the matching `venv` package are installed, then re-run `bash postinstall.sh`
+
+**Install fails during preinstall**
+- Confirm `node --version` reports v24.0.0 or newer
+- Confirm `python3.12 --version` or `python3 --version` reports Python 3.12 or newer
 
 **Persistent CoAP timeouts**
 - CoAP (UDP) can be blocked by some network configurations; ensure UDP is allowed between Homebridge and the device

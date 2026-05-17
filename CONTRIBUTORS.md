@@ -10,6 +10,9 @@ Combined fork author. Bundled aioairctrl into the plugin, automated Python envir
 **[Claude Sonnet 4.6](https://claude.ai)** (Anthropic)
 Code review of aioairctrl (bug fixes, type annotation corrections, input validation), refactoring of homebridge plugin for the bundled architecture, postinstall automation, documentation authoring.
 
+**OpenAI Codex**
+Python 3.12 and Node.js 24 compatibility review, runtime detection hardening, dependency range updates, ESLint flat config migration, and documentation updates.
+
 ## Original Authors
 
 **[louiscrc](https://github.com/louiscrc)**
