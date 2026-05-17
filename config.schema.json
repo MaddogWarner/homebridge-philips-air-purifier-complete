@@ -2,6 +2,7 @@
   "pluginAlias": "PhilipsAirPurifier",
   "pluginType": "accessory",
   "singular": false,
+  "headerDisplay": "<p align='center'><img src='https://raw.githubusercontent.com/MaddogWarner/homebridge-philips-air-purifier-complete/main/icon.png' width='150' alt='Philips Air Purifier'></p>",
   "schema": {
     "type": "object",
     "properties": {

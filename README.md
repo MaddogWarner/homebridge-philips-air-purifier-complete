@@ -1,8 +1,14 @@
 # homebridge-philips-air-purifier-complete
 
-[![npm](https://img.shields.io/npm/v/homebridge-philips-air-purifier-complete)](https://www.npmjs.com/package/homebridge-philips-air-purifier-complete)
-[![Homebridge](https://img.shields.io/badge/homebridge-%3E%3D2.0.0-blue)](https://homebridge.io)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+<p align="center">
+  <img src="https://raw.githubusercontent.com/MaddogWarner/homebridge-philips-air-purifier-complete/main/icon.png" width="200" alt="Philips Air Purifier">
+</p>
+
+<p align="center">
+  <a href="https://www.npmjs.com/package/homebridge-philips-air-purifier-complete"><img src="https://img.shields.io/npm/v/homebridge-philips-air-purifier-complete" alt="npm"></a>
+  <a href="https://homebridge.io"><img src="https://img.shields.io/badge/homebridge-%3E%3D2.0.0-blue" alt="Homebridge"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+</p>
 
 Control your Philips Air Purifier from Apple HomeKit via Homebridge — **with no separate Python package install required**.
 
