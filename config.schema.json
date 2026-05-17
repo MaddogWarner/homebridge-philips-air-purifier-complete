@@ -1,0 +1,52 @@
+{
+  "pluginAlias": "PhilipsAirPurifier",
+  "pluginType": "accessory",
+  "singular": false,
+  "schema": {
+    "type": "object",
+    "properties": {
+      "name": {
+        "title": "Name",
+        "type": "string",
+        "required": true,
+        "default": "Air Purifier",
+        "description": "The name of your air purifier as it will appear in HomeKit"
+      },
+      "host": {
+        "title": "IP Address",
+        "type": "string",
+        "required": true,
+        "format": "ipv4",
+        "placeholder": "192.168.1.100",
+        "description": "IP address of your Philips Air Purifier"
+      },
+      "pythonPath": {
+        "title": "Python Path (Optional)",
+        "type": "string",
+        "required": false,
+        "placeholder": "Auto-detected",
+        "description": "Path to Python 3 with aiocoap and pycryptodomex installed. Leave blank to use the plugin's bundled virtual environment (recommended)."
+      }
+    }
+  },
+  "layout": [
+    {
+      "type": "fieldset",
+      "title": "Device Settings",
+      "expandable": false,
+      "items": ["name", "host"]
+    },
+    {
+      "type": "fieldset",
+      "title": "Advanced Settings",
+      "expandable": true,
+      "expanded": false,
+      "items": [
+        {
+          "key": "pythonPath",
+          "description": "Only needed if the auto-detected Python does not have the required dependencies"
+        }
+      ]
+    }
+  ]
+}
