@@ -44,4 +44,4 @@ Initial release of `homebridge-philips-air-purifier-complete`.
 
 ## Prior History
 
-Changes made in [MaddogWarner/homebridge-philips-air-purifier](https://github.com/MaddogWarner/homebridge-philips-air-purifier) before this combined release are not repeated here. That repo's history serves as the prior changelog.
+Changes made in [MadDogWarner/homebridge-philips-air-purifier](https://github.com/MadDogWarner/homebridge-philips-air-purifier) before this combined release are not repeated here. That repo's history serves as the prior changelog.

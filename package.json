@@ -14,14 +14,14 @@
     "node": ">=18.0.0",
     "homebridge": ">=2.0.0"
   },
-  "author": "MaddogWarner",
+  "author": "MadDogWarner",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/MaddogWarner/homebridge-philips-air-purifier-complete.git"
+    "url": "git+https://github.com/MadDogWarner/homebridge-philips-air-purifier-complete.git"
   },
   "bugs": {
-    "url": "https://github.com/MaddogWarner/homebridge-philips-air-purifier-complete/issues"
+    "url": "https://github.com/MadDogWarner/homebridge-philips-air-purifier-complete/issues"
   },
   "dependencies": {},
   "devDependencies": {

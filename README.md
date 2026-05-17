@@ -1,7 +1,7 @@
 # homebridge-philips-air-purifier-complete
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/MaddogWarner/homebridge-philips-air-purifier-complete/main/icon.png" width="200" alt="Philips Air Purifier">
+  <img src="https://raw.githubusercontent.com/MadDogWarner/homebridge-philips-air-purifier-complete/main/icon.png" width="200" alt="Philips Air Purifier">
 </p>
 
 <p align="center">
@@ -226,5 +226,5 @@ See [CONTRIBUTORS.md](CONTRIBUTORS.md) for the full contributor list.
 
 ## Support
 
-- **Issues:** [GitHub Issues](https://github.com/MaddogWarner/homebridge-philips-air-purifier-complete/issues)
+- **Issues:** [GitHub Issues](https://github.com/MadDogWarner/homebridge-philips-air-purifier-complete/issues)
 - **Homebridge community:** [homebridge.io](https://homebridge.io)
