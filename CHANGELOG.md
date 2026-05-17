@@ -6,6 +6,15 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [1.0.1] — 2026-05-17
+
+### Changes
+
+- Added plugin icon (`icon.png`) — displays in the Homebridge UI plugin settings panel and on the npm package page
+- Excluded source icon file from npm package to reduce published package size
+
+---
+
 ## [1.0.0] — 2026-05-17
 
 Initial release of `homebridge-philips-air-purifier-complete`.
