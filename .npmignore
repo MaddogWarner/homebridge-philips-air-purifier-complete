@@ -8,4 +8,5 @@ node_modules/
 .prettierrc
 .flake8
 .git/
+.claude/
 philipsairhbicon.png

@@ -6,6 +6,14 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [2.0.2] — 2026-05-18
+
+### Changes
+
+- Excluded `.claude/` directory from npm package (contained only local tooling config, no secrets).
+
+---
+
 ## [2.0.1] — 2026-05-18
 
 ### Breaking Changes
