@@ -3,6 +3,8 @@
 # Warns if the host runtime does not meet plugin requirements.
 
 PYTHON_MIN_VERSION="3.12"
+PYTHON_MIN_MAJOR="${PYTHON_MIN_VERSION%%.*}"
+PYTHON_MIN_MINOR="${PYTHON_MIN_VERSION#*.}"
 NODE_MIN_MAJOR=24
 
 warn() {
@@ -13,7 +15,7 @@ warn() {
 }
 
 python_version_ok() {
-    "$1" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 12) else 1)' 2>/dev/null
+    "$1" -c "import sys; raise SystemExit(0 if sys.version_info >= (${PYTHON_MIN_MAJOR}, ${PYTHON_MIN_MINOR}) else 1)" 2>/dev/null
 }
 
 resolve_python_candidate() {

@@ -6,6 +6,32 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [2.1.0] — 2026-05-18
+
+### Changes
+
+- Removed dead `mode !== null` predicate from `SPEED_TO_MODE.find()` in the RotationSpeed setter — redundant since the unreachable `{ max: 0, mode: null }` entry was removed in 2.0.3.
+- Extended the `PYTHON_MIN_VERSION` single-source-of-truth fix to `preinstall.sh` and `postinstall.sh`: both scripts now derive the Python version tuple from `PYTHON_MIN_VERSION` using bash string operators (`%%.*` / `#*.`), eliminating the separate hardcoded `(3, 12)` tuples in `python_version_ok()` and the postinstall verify step.
+
+---
+
+## [2.0.5] — 2026-05-18
+
+### Changes
+
+- Made `PYTHON_MIN_VERSION` the single source of truth for Node-side Python runtime validation by deriving the embedded Python version tuple from the display string.
+
+---
+
+## [2.0.4] — 2026-05-18
+
+### Changes
+
+- Removed the CoAP Observe option from one-shot status reads in `aioairctrl/coap/client.py` so CLI diagnostics no longer create unused Observe subscriptions.
+- Left the dedicated `observe_status()` path unchanged for the Homebridge daemon's real-time CoAP Observe updates.
+
+---
+
 ## [2.0.3] — 2026-05-18
 
 ### Changes

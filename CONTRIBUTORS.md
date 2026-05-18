@@ -8,7 +8,7 @@ Combined fork author. Bundled aioairctrl into the plugin, automated Python envir
 ## AI Assistance
 
 **[Claude Sonnet 4.6](https://claude.ai)** (Anthropic)
-Code review of aioairctrl (bug fixes, type annotation corrections, input validation), refactoring of homebridge plugin for the bundled architecture, postinstall automation, documentation authoring.
+Code review of aioairctrl (bug fixes, type annotation corrections, input validation), refactoring of homebridge plugin for the bundled architecture, postinstall automation, documentation authoring. Additional contributions: daemon readline listener leak fix, removal of orphaned CoAP Observe subscription from one-shot `get_status()`, `PYTHON_MIN_VERSION` single-source-of-truth refactor across JS and shell runtimes, removal of dead `SPEED_TO_MODE` entry and residual null guard.
 
 **OpenAI Codex**
 Python 3.12 and Node.js 24 compatibility review, runtime detection hardening, dependency range updates, ESLint flat config migration, and documentation updates.

@@ -58,10 +58,13 @@ const MODE_TO_SPEED = {
 // Restart backoff delays in ms
 const RESTART_DELAYS = [5000, 10000, 30000, 60000];
 const PYTHON_MIN_VERSION = '3.12';
-// Keep the version tuple in PYTHON_RUNTIME_CHECK in sync with PYTHON_MIN_VERSION above.
+const [PYTHON_MIN_MAJOR, PYTHON_MIN_MINOR] = PYTHON_MIN_VERSION.split('.').map(Number);
+if (!Number.isInteger(PYTHON_MIN_MAJOR) || !Number.isInteger(PYTHON_MIN_MINOR)) {
+  throw new Error(`Invalid PYTHON_MIN_VERSION: ${PYTHON_MIN_VERSION}`);
+}
 const PYTHON_RUNTIME_CHECK = `
 import sys
-if sys.version_info < (3, 12):
+if sys.version_info < (${PYTHON_MIN_MAJOR}, ${PYTHON_MIN_MINOR}):
     raise SystemExit(1)
 import aiocoap, Cryptodome
 `;
@@ -477,7 +480,7 @@ class PhilipsAirPurifierAccessory {
           await this.executeCommand('power', ['off'], { power: false });
         } else {
           if (!this.state.power) await this.executeCommand('power', ['on'], { power: true });
-          const entry = SPEED_TO_MODE.find(({ max, mode }) => value <= max && mode !== null);
+          const entry = SPEED_TO_MODE.find(({ max }) => value <= max);
           const mode = entry ? entry.mode : 'medium';
           await this.executeCommand('mode', [mode], { mode });
         }

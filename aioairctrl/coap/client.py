@@ -65,7 +65,6 @@ class Client:
             mtype=NON,
             uri=f"coap://{self.host}:{self.port}{self.STATUS_PATH}",
         )
-        request.opt.observe = 0
         response = await self._client_context.request(request).response
         payload_encrypted = response.payload.decode()
         payload = self._encryption_context.decrypt(payload_encrypted)

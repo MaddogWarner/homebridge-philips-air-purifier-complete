@@ -7,9 +7,11 @@
 PLUGIN_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 VENV_DIR="$PLUGIN_DIR/.venv"
 PYTHON_MIN_VERSION="3.12"
+PYTHON_MIN_MAJOR="${PYTHON_MIN_VERSION%%.*}"
+PYTHON_MIN_MINOR="${PYTHON_MIN_VERSION#*.}"
 
 python_version_ok() {
-    "$1" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 12) else 1)' 2>/dev/null
+    "$1" -c "import sys; raise SystemExit(0 if sys.version_info >= (${PYTHON_MIN_MAJOR}, ${PYTHON_MIN_MINOR}) else 1)" 2>/dev/null
 }
 
 resolve_python_candidate() {
@@ -109,7 +111,7 @@ if [ $? -ne 0 ]; then
 fi
 
 # Verify the setup works
-if "$VENV_DIR/bin/python3" -c "import sys; assert sys.version_info >= (3, 12); import aiocoap, Cryptodome" 2>/dev/null; then
+if "$VENV_DIR/bin/python3" -c "import sys; assert sys.version_info >= (${PYTHON_MIN_MAJOR}, ${PYTHON_MIN_MINOR}); import aiocoap, Cryptodome" 2>/dev/null; then
     echo "  Python dependencies installed successfully."
 else
     warn "Dependencies installed but import check failed - check your Python environment."
