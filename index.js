@@ -42,7 +42,6 @@ const LIGHT = {
 
 // Map rotation speed percentage to mode
 const SPEED_TO_MODE = [
-  { max: 0,   mode: null },
   { max: 33,  mode: 'sleep' },
   { max: 66,  mode: 'medium' },
   { max: 100, mode: 'turbo' },
@@ -134,7 +133,10 @@ class DaemonHandler {
       this.rl = readline.createInterface({ input: this.daemon.stdout, terminal: false });
       this.rl.on('line', (line) => this.handleMessage(line));
 
-      const timeout = setTimeout(() => reject(new Error('Daemon startup timeout')), 20000);
+      const timeout = setTimeout(() => {
+        this.rl.removeListener('line', readyHandler);
+        reject(new Error('Daemon startup timeout'));
+      }, 20000);
 
       const readyHandler = (line) => {
         try {
@@ -298,13 +300,23 @@ class PhilipsAirPurifierAccessory {
 
   findPython(pluginDir) {
     const candidates = [
+      process.env.PHILIPS_AIR_PYTHON,
+      process.env.PYTHON,
+      process.env.PYTHON3,
       path.join(pluginDir, '.venv', 'bin', 'python3'),
       path.join(pluginDir, '.venv', 'bin', 'python3.12'),
       path.join(pluginDir, 'venv', 'bin', 'python3'),
       path.join(pluginDir, 'venv', 'bin', 'python3.12'),
+      '/usr/local/opt/python@3.12/bin/python3.12',
       '/opt/homebrew/bin/python3.12',
+      '/opt/homebrew/bin/python3.13',
       '/usr/local/bin/python3.12',
+      '/usr/local/bin/python3.13',
       '/usr/bin/python3.12',
+      '/usr/bin/python3.13',
+      '/volume1/@appstore/Python3.12/usr/local/bin/python3.12',
+      '/volume1/@appstore/py3k/usr/local/bin/python3',
+      'python3.13',
       'python3.12',
       '/usr/bin/python3',
       '/usr/local/bin/python3',
@@ -312,6 +324,7 @@ class PhilipsAirPurifierAccessory {
     ];
 
     for (const pythonPath of candidates) {
+      if (!pythonPath) continue;
       const isCommandName = !pythonPath.includes(path.sep);
       if (!isCommandName && !fs.existsSync(pythonPath)) continue;
       try {

@@ -6,6 +6,19 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [2.0.3] — 2026-05-18
+
+### Changes
+
+- Changed `preinstall.sh` to warn about unsupported Node.js or Python versions without blocking npm/Homebridge UI installation.
+- Extended Python discovery in `preinstall.sh` for Docker/NAS deployments: checks `PHILIPS_AIR_PYTHON`, npm's `--python` setting (`npm_config_python`), common absolute paths (`/opt/homebrew`, `/usr/local`, `/usr/bin`), and Synology-style paths.
+- Added `PHILIPS_AIR_SKIP_PYTHON_PREINSTALL=1` environment variable to bypass the Python preinstall check in managed environments where `pythonPath` is configured after installation.
+- Fixed listener leak in `DaemonHandler.start()`: `readyHandler` is now removed from the readline interface when the 20-second startup timeout fires.
+- Removed unreachable `{ max: 0, mode: null }` entry from `SPEED_TO_MODE` in `index.js`.
+- Updated README troubleshooting to explain expected preinstall warnings and how to provide an explicit Python path when npm has a restricted `PATH`.
+
+---
+
 ## [2.0.2] — 2026-05-18
 
 ### Changes

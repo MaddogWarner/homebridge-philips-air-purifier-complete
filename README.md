@@ -70,7 +70,25 @@ The install hook creates a plugin-local virtual environment and installs:
 
 The plugin automatically sets up a Python virtual environment and installs its CoAP dependencies during install. No extra steps needed.
 
-The npm `preinstall` check fails early if Node.js 24+ or Python 3.12+ is not available on the host.
+The npm `preinstall` check reports warnings if Node.js 24+ or Python 3.12+ is not available on the host, but it does not block installation. This keeps Homebridge UI plugin installation simple while still making unsupported runtime versions visible in the install log.
+
+For Docker, NAS, or managed Homebridge installs where npm runs with a restricted `PATH`, provide the Python path explicitly:
+
+```bash
+PHILIPS_AIR_PYTHON=/absolute/path/to/python3.12 npm install -g homebridge-philips-air-purifier-complete
+```
+
+The installer also honours npm's Python setting:
+
+```bash
+npm install -g homebridge-philips-air-purifier-complete --python=/absolute/path/to/python3.12
+```
+
+If the install environment cannot expose Python until after the plugin is installed, configure `pythonPath` in Homebridge before starting the plugin. You can also suppress the Python preinstall warning:
+
+```bash
+PHILIPS_AIR_SKIP_PYTHON_PREINSTALL=1 npm install -g homebridge-philips-air-purifier-complete
+```
 
 ### Via npm
 
@@ -202,9 +220,11 @@ python3.12 philips_air_api.py 192.168.1.100 childlock off
 **Python setup failed during install**
 - Ensure Python 3.12+ and the matching `venv` package are installed, then re-run `bash postinstall.sh`
 
-**Install fails during preinstall**
-- Confirm `node --version` reports v24.0.0 or newer
-- Confirm `python3.12 --version` or `python3 --version` reports Python 3.12 or newer
+**Preinstall warnings**
+- Warnings about Node.js mean `node --version` did not report v24.0.0 or newer during install
+- Warnings about Python mean `python3.12 --version` or `python3 --version` did not report Python 3.12 or newer during install
+- If Python 3.12+ is installed but not visible to npm, install with `PHILIPS_AIR_PYTHON=/absolute/path/to/python3.12 npm install -g homebridge-philips-air-purifier-complete`
+- If Python can only be configured after install, set `pythonPath` in the Homebridge plugin configuration before starting Homebridge
 
 **Persistent CoAP timeouts**
 - CoAP (UDP) can be blocked by some network configurations; ensure UDP is allowed between Homebridge and the device
