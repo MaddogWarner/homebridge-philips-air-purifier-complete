@@ -10,3 +10,6 @@ node_modules/
 .git/
 .claude/
 philipsairhbicon.png
+IMG_0301.*
+codex-plan.md
+package-lock.json
