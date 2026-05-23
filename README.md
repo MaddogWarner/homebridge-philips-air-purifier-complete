@@ -26,7 +26,8 @@ This plugin bundles the [aioairctrl](https://github.com/betaboon/aioairctrl) CoA
 - **Child Lock** — Lock or unlock physical controls on the device
 - **HEPA Filter Status** — Filter life percentage and change alert
 - **Pre-Filter Status** — Cleanup cycle percentage and change alert
-- **Real-time Updates** — CoAP Observe push updates from the device (~every 30s or on change)
+- **HTTP Protocol Support** — Supports AC1xxx-series models (e.g. AC1715) that use HTTP instead of CoAP
+- **Real-time Updates** — CoAP Observe push updates (AC2xxx+) or 10-second HTTP polling (AC1xxx)
 - **Auto-reconnect** — Daemon restarts automatically with exponential backoff if the device drops off
 
 ---
@@ -120,7 +121,22 @@ Add to your Homebridge `config.json` under `"accessories"`:
 }
 ```
 
-Or configure via the Homebridge UI — just fill in the **Name** and **IP Address** fields.
+For AC1xxx models that use HTTP:
+
+```json
+{
+  "accessories": [
+    {
+      "accessory": "PhilipsAirPurifier",
+      "name": "Bedroom Air Purifier",
+      "host": "192.168.1.101",
+      "protocol": "http"
+    }
+  ]
+}
+```
+
+Or configure via the Homebridge UI — fill in **Name** and **IP Address**, and set **Protocol** to `http` if your device is an AC1xxx model.
 
 ### Configuration Options
 
@@ -128,7 +144,17 @@ Or configure via the Homebridge UI — just fill in the **Name** and **IP Addres
 |--------|----------|---------|-------------|
 | `name` | Yes | — | Name shown in HomeKit |
 | `host` | Yes | — | IPv4 address of your air purifier |
+| `protocol` | No | `coap` | Communication protocol. Set to `http` for AC1xxx models (AC1715, etc.) that do not support CoAP. |
 | `pythonPath` | No | Auto-detected | Path to Python 3.12 or newer with `aiocoap` and `pycryptodomex` installed. Leave blank to use the plugin's bundled virtual environment. |
+
+### Model Compatibility
+
+| Protocol | Models | Notes |
+|----------|--------|-------|
+| `coap` (default) | AC2xxx, AC3xxx, AC4xxx | CoAP Observe push updates |
+| `http` | AC1xxx (e.g. AC1715) | HTTP polling every 10 seconds |
+
+If your device shows `Network error: NetworkError` on every command, try setting `"protocol": "http"` in your accessory config.
 
 ---
 
@@ -174,14 +200,17 @@ Homebridge (Node.js)
     ▼
 philips_air_api.py  ─── aioairctrl/ (bundled) ──► aiocoap ──► Philips device (CoAP)
     │
+    └──────────────────── HTTP encrypted polling ───────────► Philips device (HTTP)
+    │
     │  CoAP Observe (push)
     │  ≈ every 30s or on change
+    │  HTTP polling every 10s
     ▼
 State cache ──► HomeKit characteristics
 ```
 
 - The Python daemon maintains a **CoAP Observe** subscription to the device
-- The device pushes state updates; no polling
+- For HTTP models, the Python daemon polls the local API every 10 seconds
 - Commands (power, mode, light) are sent directly and complete in ~100–300ms
 - The Node.js plugin communicates with the daemon over stdin/stdout JSON
 - If the daemon exits for any reason, Homebridge restarts it with exponential backoff (5s → 10s → 30s → 60s)
@@ -229,6 +258,10 @@ python3.12 philips_air_api.py 192.168.1.100 childlock off
 **Persistent CoAP timeouts**
 - CoAP (UDP) can be blocked by some network configurations; ensure UDP is allowed between Homebridge and the device
 - Assign a static IP to the device in your router's DHCP settings
+
+**`Network error: NetworkError` on every command**
+- Your device may use HTTP instead of CoAP. Set `"protocol": "http"` in your Homebridge accessory configuration.
+- This affects AC1xxx models (e.g. AC1715) which do not expose a CoAP server on UDP port 5683.
 
 ---
 

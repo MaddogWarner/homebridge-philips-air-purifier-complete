@@ -6,6 +6,19 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [2.2.0] — 2026-05-23
+
+### Added
+
+- HTTP protocol support for Philips AC1xxx-series devices (e.g. AC1715) that do not implement
+  CoAP. Set `"protocol": "http"` in your Homebridge accessory configuration to use this mode.
+  HTTP devices use 10-second polling instead of CoAP Observe push updates.
+- New `protocol` config option (`"coap"` | `"http"`, default `"coap"`). Each accessory
+  configures its protocol independently, so mixed households (AC1715 + AC3858) work without
+  any shared state.
+
+---
+
 ## [2.1.0] — 2026-05-18
 
 ### Changes

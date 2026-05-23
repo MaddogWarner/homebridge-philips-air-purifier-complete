@@ -21,6 +21,13 @@
         "placeholder": "192.168.1.100",
         "description": "IP address of your Philips Air Purifier"
       },
+      "protocol": {
+        "title": "Protocol",
+        "type": "string",
+        "enum": ["coap", "http"],
+        "default": "coap",
+        "description": "Communication protocol. Use 'http' for AC1xxx models (AC1715, etc.) that do not support CoAP."
+      },
       "pythonPath": {
         "title": "Python Path (Optional)",
         "type": "string",
@@ -35,7 +42,7 @@
       "type": "fieldset",
       "title": "Device Settings",
       "expandable": false,
-      "items": ["name", "host"]
+      "items": ["name", "host", "protocol"]
     },
     {
       "type": "fieldset",

@@ -1,14 +1,14 @@
 /**
  * Homebridge Philips Air Purifier Complete Plugin
  *
- * Controls Philips Air Purifiers via CoAP protocol using a persistent
- * Python daemon with CoAP Observe for real-time push updates.
+ * Controls Philips Air Purifiers via CoAP or HTTP using a persistent
+ * Python daemon with CoAP Observe or HTTP polling for state updates.
  *
  * Architecture:
- * - Python daemon maintains a CoAP Observe subscription
- * - Device pushes state updates (~every 30s or on change)
+ * - Python daemon maintains a CoAP Observe subscription or HTTP polling loop
+ * - Device pushes CoAP updates, while HTTP models are polled every 10 seconds
  * - Commands (power, mode, light, etc.) are sent directly and are fast
- * - State reads use cached data from observe updates (instant)
+ * - State reads use cached data from observe or poll updates (instant)
  *
  * The aioairctrl Python library is bundled in the aioairctrl/ directory.
  * Only aiocoap and pycryptodomex need to be installed (done by postinstall.sh).
@@ -74,10 +74,10 @@ module.exports = (api) => {
 };
 
 /**
- * Daemon communication handler with CoAP Observe support.
+ * Daemon communication handler.
  *
- * The daemon uses CoAP Observe to receive push updates from the device.
- * State reads are instant (cached), commands are sent directly.
+ * The daemon uses CoAP Observe or HTTP polling to receive updates from the device.
+ * State reads use cached data, commands are sent directly.
  */
 class DaemonHandler {
   constructor(log, onUpdate, onExit) {
@@ -93,11 +93,16 @@ class DaemonHandler {
     this.commandTimeout = 15000;
   }
 
-  async start(pythonPath, scriptPath, host) {
+  async start(pythonPath, scriptPath, host, protocol = 'coap') {
     return new Promise((resolve, reject) => {
-      this.log.info(`Starting observe daemon: ${pythonPath} ${scriptPath} ${host} --daemon`);
+      const args = [scriptPath, host, '--daemon'];
+      if (protocol === 'http') {
+        args.push('--protocol', 'http');
+      }
 
-      this.daemon = spawn(pythonPath, [scriptPath, host, '--daemon'], {
+      this.log.info(`Starting ${protocol} daemon: ${pythonPath} ${args.join(' ')}`);
+
+      this.daemon = spawn(pythonPath, args, {
         stdio: ['pipe', 'pipe', 'pipe'],
         env: {
           PATH: process.env.PATH,
@@ -149,7 +154,7 @@ class DaemonHandler {
             this.rl.removeListener('line', readyHandler);
             this.connected = response.connected;
             if (response.connected) {
-              this.log.info('Daemon ready, waiting for first observe update...');
+              this.log.info(`Daemon ready, waiting for first ${protocol === 'http' ? 'poll' : 'observe'} update...`);
             } else {
               this.log.warn(`Daemon ready but not connected: ${response.error}`);
             }
@@ -247,11 +252,13 @@ class PhilipsAirPurifierAccessory {
 
     this.name = config.name || 'Air Purifier';
     this.host = config.host;
+    this.protocol = config.protocol || 'coap';
 
     if (!this.host) {
       throw new Error('host is required in config');
     }
     this.validateHost(this.host);
+    this.validateProtocol(this.protocol);
 
     const pluginDir = __dirname;
     this.apiScriptPath = config.apiScriptPath || path.join(pluginDir, 'philips_air_api.py');
@@ -269,6 +276,7 @@ class PhilipsAirPurifierAccessory {
 
     this.log.info(`Using Python: ${this.pythonPath}`);
     this.log.info(`Using API script: ${this.apiScriptPath}`);
+    this.log.info(`Using protocol: ${this.protocol}`);
 
     this.state = {
       power: false,
@@ -353,6 +361,12 @@ class PhilipsAirPurifierAccessory {
     }
   }
 
+  validateProtocol(protocol) {
+    if (!['coap', 'http'].includes(protocol)) {
+      throw new Error(`protocol must be "coap" or "http", got: "${protocol}"`);
+    }
+  }
+
   validatePythonPath(pythonPath) {
     if (/[;&|`$<>!]/.test(pythonPath)) {
       throw new Error(`pythonPath contains invalid characters: "${pythonPath}"`);
@@ -369,10 +383,10 @@ class PhilipsAirPurifierAccessory {
 
   async startDaemon() {
     try {
-      const connected = await this.daemon.start(this.pythonPath, this.apiScriptPath, this.host);
+      const connected = await this.daemon.start(this.pythonPath, this.apiScriptPath, this.host, this.protocol);
       this.deviceReachable = connected;
       this._restartAttempt = 0;
-      this.log.info('Daemon started, waiting for observe updates...');
+      this.log.info(`Daemon started, waiting for ${this.protocol === 'http' ? 'HTTP poll' : 'CoAP observe'} updates...`);
     } catch (error) {
       this.log.error(`Failed to start daemon: ${error.message}`);
       this.deviceReachable = false;
