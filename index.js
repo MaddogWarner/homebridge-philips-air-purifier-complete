@@ -93,11 +93,15 @@ class DaemonHandler {
     this.commandTimeout = 15000;
   }
 
-  async start(pythonPath, scriptPath, host, protocol = 'coap') {
+  async start(pythonPath, scriptPath, host, options = {}) {
     return new Promise((resolve, reject) => {
+      const protocol = options.protocol || 'coap';
       const args = [scriptPath, host, '--daemon'];
-      if (protocol === 'http') {
-        args.push('--protocol', 'http');
+      if (protocol !== 'coap') {
+        args.push('--protocol', protocol);
+      }
+      if (protocol === 'homeid-http' && options.useHttps) {
+        args.push('--use-https');
       }
 
       this.log.info(`Starting ${protocol} daemon: ${pythonPath} ${args.join(' ')}`);
@@ -109,6 +113,9 @@ class DaemonHandler {
           HOME: process.env.HOME,
           LANG: process.env.LANG || 'en_US.UTF-8',
           PYTHONUNBUFFERED: '1',
+          PHILIPS_HOMEID_CLIENT_ID: options.homeIdClientId || '',
+          PHILIPS_HOMEID_CLIENT_SECRET: options.homeIdClientSecret || '',
+          PHILIPS_HOMEID_ENCRYPTION_KEY: options.homeIdEncryptionKey || '',
           // Ensure the bundled aioairctrl package is always importable
           PYTHONPATH: path.dirname(scriptPath),
         },
@@ -154,7 +161,7 @@ class DaemonHandler {
             this.rl.removeListener('line', readyHandler);
             this.connected = response.connected;
             if (response.connected) {
-              this.log.info(`Daemon ready, waiting for first ${protocol === 'http' ? 'poll' : 'observe'} update...`);
+              this.log.info(`Daemon ready, waiting for first ${protocol === 'coap' ? 'observe' : 'poll'} update...`);
             } else {
               this.log.warn(`Daemon ready but not connected: ${response.error}`);
             }
@@ -253,6 +260,10 @@ class PhilipsAirPurifierAccessory {
     this.name = config.name || 'Air Purifier';
     this.host = config.host;
     this.protocol = config.protocol || 'coap';
+    this.homeIdClientId = config.clientId || '';
+    this.homeIdClientSecret = config.clientSecret || '';
+    this.homeIdEncryptionKey = config.encryptionKey || '';
+    this.useHttps = Boolean(config.useHttps);
 
     if (!this.host) {
       throw new Error('host is required in config');
@@ -362,8 +373,8 @@ class PhilipsAirPurifierAccessory {
   }
 
   validateProtocol(protocol) {
-    if (!['coap', 'http'].includes(protocol)) {
-      throw new Error(`protocol must be "coap" or "http", got: "${protocol}"`);
+    if (!['coap', 'http', 'homeid-http'].includes(protocol)) {
+      throw new Error(`protocol must be "coap", "http", or "homeid-http", got: "${protocol}"`);
     }
   }
 
@@ -383,10 +394,16 @@ class PhilipsAirPurifierAccessory {
 
   async startDaemon() {
     try {
-      const connected = await this.daemon.start(this.pythonPath, this.apiScriptPath, this.host, this.protocol);
+      const connected = await this.daemon.start(this.pythonPath, this.apiScriptPath, this.host, {
+        protocol: this.protocol,
+        useHttps: this.useHttps,
+        homeIdClientId: this.homeIdClientId,
+        homeIdClientSecret: this.homeIdClientSecret,
+        homeIdEncryptionKey: this.homeIdEncryptionKey,
+      });
       this.deviceReachable = connected;
       this._restartAttempt = 0;
-      this.log.info(`Daemon started, waiting for ${this.protocol === 'http' ? 'HTTP poll' : 'CoAP observe'} updates...`);
+      this.log.info(`Daemon started, waiting for ${this.protocol === 'coap' ? 'CoAP observe' : 'HTTP poll'} updates...`);
     } catch (error) {
       this.log.error(`Failed to start daemon: ${error.message}`);
       this.deviceReachable = false;

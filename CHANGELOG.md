@@ -6,6 +6,35 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [2.3.0] — 2026-05-24
+
+### Added
+
+- Added explicit `homeid-http` protocol support for HomeID/Condor local HTTP devices.
+  This path supports HTTP or HTTPS, PhilipsCondor 401 challenge authentication, optional
+  HomeID AES payload encryption, and merged polling of `status`, `air`, and `fltsts`.
+- Added HomeID configuration fields: `useHttps`, `clientId`, `clientSecret`, and
+  `encryptionKey`. HomeID secrets are passed to the Python daemon via environment
+  variables rather than command-line arguments.
+- Added `probe-homeid` CLI diagnostic command to probe HomeID HTTP/HTTPS endpoints
+  without changing device state.
+- Added focused Python unit tests for CoAP/HTTP/HomeID status normalisation,
+  HomeID AES encryption, and PhilipsCondor authentication response generation.
+
+### Fixed
+
+- Restored the normalised `mode_name` field in Python sensor output while keeping
+  `mode` compatible with the JavaScript HomeKit mapping.
+- Added clearer HTTP diagnostics for endpoint status and decrypt failures without
+  logging secrets or encrypted payloads.
+- Replaced private `ssl._create_unverified_context()` with `ssl.create_default_context()`
+  (`check_hostname=False`, `verify_mode=CERT_NONE`) for HomeID HTTPS devices with
+  self-signed certificates.
+- Removed duplicated HomeID mode mapping; both HTTP and HomeID control paths now share
+  `HTTP_MODE_VALUES`.
+
+---
+
 ## [2.2.0] — 2026-05-23
 
 ### Added

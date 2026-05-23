@@ -26,8 +26,8 @@ This plugin bundles the [aioairctrl](https://github.com/betaboon/aioairctrl) CoA
 - **Child Lock** — Lock or unlock physical controls on the device
 - **HEPA Filter Status** — Filter life percentage and change alert
 - **Pre-Filter Status** — Cleanup cycle percentage and change alert
-- **HTTP Protocol Support** — Supports AC1xxx-series models (e.g. AC1715) that use HTTP instead of CoAP
-- **Real-time Updates** — CoAP Observe push updates (AC2xxx+) or 10-second HTTP polling (AC1xxx)
+- **HTTP Protocol Support** — Supports AC1xxx-series DH/AES HTTP models (e.g. AC1715) and HomeID/Condor local HTTP devices
+- **Real-time Updates** — CoAP Observe push updates (AC2xxx+) or 10-second HTTP polling (HTTP/HomeID)
 - **Auto-reconnect** — Daemon restarts automatically with exponential backoff if the device drops off
 
 ---
@@ -136,7 +136,25 @@ For AC1xxx models that use HTTP:
 }
 ```
 
-Or configure via the Homebridge UI — fill in **Name** and **IP Address**, and set **Protocol** to `http` if your device is an AC1xxx model.
+For HomeID/Condor local HTTP devices:
+
+```json
+{
+  "accessories": [
+    {
+      "accessory": "PhilipsAirPurifier",
+      "name": "Study Air Purifier",
+      "host": "192.168.1.102",
+      "protocol": "homeid-http",
+      "useHttps": true,
+      "clientId": "BASE64_CLIENT_ID",
+      "clientSecret": "BASE64_CLIENT_SECRET"
+    }
+  ]
+}
+```
+
+Or configure via the Homebridge UI — fill in **Name** and **IP Address**, and set **Protocol** to `http` for AC1xxx DH/AES models or `homeid-http` for HomeID/Condor local HTTP devices.
 
 ### Configuration Options
 
@@ -144,7 +162,11 @@ Or configure via the Homebridge UI — fill in **Name** and **IP Address**, and 
 |--------|----------|---------|-------------|
 | `name` | Yes | — | Name shown in HomeKit |
 | `host` | Yes | — | IPv4 address of your air purifier |
-| `protocol` | No | `coap` | Communication protocol. Set to `http` for AC1xxx models (AC1715, etc.) that do not support CoAP. |
+| `protocol` | No | `coap` | Communication protocol. Use `http` for AC1xxx DH/AES models or `homeid-http` for HomeID/Condor local HTTP devices. |
+| `useHttps` | No | `false` | Use HTTPS for `homeid-http` devices with self-signed certificates. Ignored for `coap` and `http`. |
+| `clientId` | No | — | Base64 HomeID local API client ID for PhilipsCondor challenge authentication. |
+| `clientSecret` | No | — | Base64 HomeID local API client secret for PhilipsCondor challenge authentication. |
+| `encryptionKey` | No | Auto-fetched when possible | Optional hex AES key for HomeID encrypted payloads. Leave blank unless you already know it. |
 | `pythonPath` | No | Auto-detected | Path to Python 3.12 or newer with `aiocoap` and `pycryptodomex` installed. Leave blank to use the plugin's bundled virtual environment. |
 
 ### Model Compatibility
@@ -152,7 +174,8 @@ Or configure via the Homebridge UI — fill in **Name** and **IP Address**, and 
 | Protocol | Models | Notes |
 |----------|--------|-------|
 | `coap` (default) | AC2xxx, AC3xxx, AC4xxx | CoAP Observe push updates |
-| `http` | AC1xxx (e.g. AC1715) | HTTP polling every 10 seconds |
+| `http` | AC1xxx DH/AES models (e.g. AC1715) | HTTP polling every 10 seconds via `/air` |
+| `homeid-http` | HomeID/Condor local HTTP devices | HTTP/HTTPS polling every 10 seconds via `/status`, `/air`, and `/fltsts` |
 
 If your device shows `Network error: NetworkError` on every command, try setting `"protocol": "http"` in your accessory config.
 
@@ -168,6 +191,10 @@ source $(npm root -g)/homebridge-philips-air-purifier-complete/.venv/bin/activat
 
 # Run a sensor query
 python $(npm root -g)/homebridge-philips-air-purifier-complete/philips_air_api.py 192.168.1.100 sensors
+
+# Probe HomeID local HTTP endpoints without changing device state
+python $(npm root -g)/homebridge-philips-air-purifier-complete/philips_air_api.py 192.168.1.100 probe-homeid
+python $(npm root -g)/homebridge-philips-air-purifier-complete/philips_air_api.py 192.168.1.100 probe-homeid --use-https
 ```
 
 You should see a JSON payload with PM2.5, filter life, temperature, and so on. CoAP can be flaky on the first connection — re-run if you get a timeout.
@@ -200,7 +227,9 @@ Homebridge (Node.js)
     ▼
 philips_air_api.py  ─── aioairctrl/ (bundled) ──► aiocoap ──► Philips device (CoAP)
     │
-    └──────────────────── HTTP encrypted polling ───────────► Philips device (HTTP)
+    ├──────────────────── DH/AES HTTP polling ──────────────► Philips device (HTTP)
+    │
+    └──────────────────── HomeID HTTP/HTTPS polling ────────► Philips device (HomeID)
     │
     │  CoAP Observe (push)
     │  ≈ every 30s or on change
@@ -211,6 +240,7 @@ State cache ──► HomeKit characteristics
 
 - The Python daemon maintains a **CoAP Observe** subscription to the device
 - For HTTP models, the Python daemon polls the local API every 10 seconds
+- HomeID mode polls `status`, `air`, and `fltsts`, and supports PhilipsCondor challenge authentication
 - Commands (power, mode, light) are sent directly and complete in ~100–300ms
 - The Node.js plugin communicates with the daemon over stdin/stdout JSON
 - If the daemon exits for any reason, Homebridge restarts it with exponential backoff (5s → 10s → 30s → 60s)
@@ -260,8 +290,8 @@ python3.12 philips_air_api.py 192.168.1.100 childlock off
 - Assign a static IP to the device in your router's DHCP settings
 
 **`Network error: NetworkError` on every command**
-- Your device may use HTTP instead of CoAP. Set `"protocol": "http"` in your Homebridge accessory configuration.
-- This affects AC1xxx models (e.g. AC1715) which do not expose a CoAP server on UDP port 5683.
+- Your device may use HTTP instead of CoAP. Set `"protocol": "http"` for AC1xxx DH/AES models such as AC1715.
+- If your device responds to HomeID local HTTP endpoints or PhilipsCondor authentication challenges, use `"protocol": "homeid-http"` and configure `clientId` / `clientSecret` if required.
 
 ---
 

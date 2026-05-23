@@ -24,9 +24,36 @@
       "protocol": {
         "title": "Protocol",
         "type": "string",
-        "enum": ["coap", "http"],
+        "enum": ["coap", "http", "homeid-http"],
         "default": "coap",
-        "description": "Communication protocol. Use 'http' for AC1xxx models (AC1715, etc.) that do not support CoAP."
+        "description": "Communication protocol. Use 'http' for AC1xxx DH/AES models (AC1715, etc.) or 'homeid-http' for HomeID/Condor local HTTP devices."
+      },
+      "useHttps": {
+        "title": "Use HTTPS for HomeID",
+        "type": "boolean",
+        "default": false,
+        "description": "Use HTTPS for the HomeID local API. Only applies when Protocol is 'homeid-http'."
+      },
+      "clientId": {
+        "title": "HomeID Client ID",
+        "type": "string",
+        "required": false,
+        "x-schema-form": { "type": "password" },
+        "description": "Base64 HomeID local API client ID. Only required for HomeID devices that return a PhilipsCondor authentication challenge."
+      },
+      "clientSecret": {
+        "title": "HomeID Client Secret",
+        "type": "string",
+        "required": false,
+        "x-schema-form": { "type": "password" },
+        "description": "Base64 HomeID local API client secret. Only required for HomeID devices that return a PhilipsCondor authentication challenge."
+      },
+      "encryptionKey": {
+        "title": "HomeID Encryption Key",
+        "type": "string",
+        "required": false,
+        "x-schema-form": { "type": "password" },
+        "description": "Optional hex AES key for HomeID local HTTP payload encryption. If omitted and credentials are provided, the plugin attempts to fetch it from the device security endpoint."
       },
       "pythonPath": {
         "title": "Python Path (Optional)",
@@ -50,6 +77,22 @@
       "expandable": true,
       "expanded": false,
       "items": [
+        {
+          "key": "useHttps",
+          "description": "Only applies to the homeid-http protocol"
+        },
+        {
+          "key": "clientId",
+          "description": "Only applies to HomeID/Condor devices"
+        },
+        {
+          "key": "clientSecret",
+          "description": "Only applies to HomeID/Condor devices"
+        },
+        {
+          "key": "encryptionKey",
+          "description": "Optional HomeID AES key; leave blank unless needed"
+        },
         {
           "key": "pythonPath",
           "description": "Only needed if the auto-detected Python does not have the required dependencies"

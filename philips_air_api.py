@@ -13,18 +13,34 @@ Note: aioairctrl is bundled in the aioairctrl/ directory alongside this script.
 import asyncio
 import argparse
 import base64
+import hashlib
 import json
+import os
 import secrets
+import ssl
 import sys
 import signal
 import time
+import urllib.error
 import urllib.request
 from typing import Dict, Any, Optional
 
-from Cryptodome.Cipher import AES
-from Cryptodome.Util.Padding import pad, unpad
+try:
+    from Cryptodome.Cipher import AES
+    from Cryptodome.Util.Padding import pad, unpad
+    CRYPTO_AVAILABLE = True
+except ModuleNotFoundError:
+    AES = None
+    pad = None
+    unpad = None
+    CRYPTO_AVAILABLE = False
 
-from aioairctrl.coap.client import Client
+try:
+    from aioairctrl.coap.client import Client
+    COAP_AVAILABLE = True
+except ModuleNotFoundError:
+    Client = None
+    COAP_AVAILABLE = False
 
 
 # Constants
@@ -49,6 +65,13 @@ HTTP_MODE_VALUES = {
     "turbo": {"mode": "M", "om": "t"},
 }
 
+HOMEID_PORT_STATUS = "status"
+HOMEID_PORT_AIR = "air"
+HOMEID_PORT_FLTSTS = "fltsts"
+HOMEID_PORT_DEVICE = "device"
+HOMEID_PORT_SECURITY = "security"
+HOMEID_PORT_FIRMWARE = "firmware"
+
 MODE_NAMES = {
     MODE_AUTO: "auto",
     MODE_SLEEP: "sleep",
@@ -68,6 +91,16 @@ _P = int(
     "FFFFFFFFFFFFFFFF",
     16,
 )
+
+
+def _require_crypto():
+    if not CRYPTO_AVAILABLE:
+        raise RuntimeError("pycryptodomex is required for Philips encrypted HTTP support")
+
+
+def _require_coap():
+    if not COAP_AVAILABLE:
+        raise RuntimeError("aiocoap is required for Philips CoAP support")
 
 
 def _first_value(status: Dict[str, Any], *keys: str, default: Any = None) -> Any:
@@ -144,6 +177,7 @@ def parse_status(status: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "power": _as_bool(_first_value(status, PARAM_POWER, "pwr", default=0)),
         "mode": mode_name,
+        "mode_name": mode_name,
         "pm25": _as_number(_first_value(status, "D03221", "pm25")),
         "iaql": _as_number(_first_value(status, "D03120", "iaql")),
         "tvoc": status.get("tvoc"),
@@ -179,14 +213,19 @@ class PhilipsAirHTTPClient:
         return self._session_key
 
     def _encrypt(self, values: Dict[str, Any]) -> bytes:
+        _require_crypto()
         data = "AA" + json.dumps(values)
         cipher = AES.new(self._require_session_key(), AES.MODE_CBC, iv=bytes(16))
         return base64.b64encode(cipher.encrypt(pad(data.encode(), 16, style="pkcs7")))
 
     def _decrypt(self, data: bytes) -> Dict[str, Any]:
-        cipher = AES.new(self._require_session_key(), AES.MODE_CBC, iv=bytes(16))
-        decrypted = unpad(cipher.decrypt(base64.b64decode(data)), 16, style="pkcs7")[2:]
-        return json.loads(decrypted)
+        try:
+            _require_crypto()
+            cipher = AES.new(self._require_session_key(), AES.MODE_CBC, iv=bytes(16))
+            decrypted = unpad(cipher.decrypt(base64.b64decode(data)), 16, style="pkcs7")[2:]
+            return json.loads(decrypted)
+        except Exception as e:
+            raise ValueError(f"Failed to decrypt HTTP response from {self.host}: {e}") from e
 
     def _http(self, method: str, path: str, body: Optional[bytes] = None) -> bytes:
         request = urllib.request.Request(
@@ -195,8 +234,13 @@ class PhilipsAirHTTPClient:
             method=method,
             headers={"Content-Type": "application/json"},
         )
-        with urllib.request.urlopen(request, timeout=10) as response:
-            return response.read()
+        try:
+            with urllib.request.urlopen(request, timeout=10) as response:
+                return response.read()
+        except urllib.error.HTTPError as e:
+            raise ConnectionError(f"HTTP {method} {path} failed with status {e.code}") from e
+        except urllib.error.URLError as e:
+            raise ConnectionError(f"HTTP {method} {path} failed: {e.reason}") from e
 
     def connect(self):
         """Perform the DH key exchange and store the local HTTP session key."""
@@ -210,6 +254,7 @@ class PhilipsAirHTTPClient:
         shared_key = shared_secret.to_bytes(128, byteorder="big")[:16]
 
         encrypted_key = base64.b64decode(response["key"])
+        _require_crypto()
         cipher = AES.new(shared_key, AES.MODE_CBC, iv=bytes(16))
         self._session_key = unpad(cipher.decrypt(encrypted_key), 16, style="pkcs7")[:16]
 
@@ -219,6 +264,236 @@ class PhilipsAirHTTPClient:
 
     def set_values(self, values: Dict[str, Any]):
         self._http("PUT", "/di/v1/products/1/air", self._encrypt(values))
+
+
+class PhilipsCondorAuth:
+    """PhilipsCondor challenge/response authentication for HomeID local HTTP."""
+
+    SCHEME_VARIANTS = ("PhilipsCondor", "PHILIPS-Condor", "Philips-Condor")
+    MIN_CHALLENGE_SIZE = 8
+    MAX_CHALLENGE_SIZE = 64
+
+    @staticmethod
+    def create_credentials(challenge_header: str, client_id: str, client_secret: str) -> str:
+        challenge = challenge_header.strip()
+        response_scheme = "PhilipsCondor"
+        for variant in PhilipsCondorAuth.SCHEME_VARIANTS:
+            if challenge.lower().startswith(variant.lower()):
+                response_scheme = challenge[:len(variant)]
+                challenge = challenge[len(variant):].strip()
+                break
+
+        challenge_bytes = base64.b64decode(challenge)
+        if not (
+            PhilipsCondorAuth.MIN_CHALLENGE_SIZE
+            <= len(challenge_bytes)
+            <= PhilipsCondorAuth.MAX_CHALLENGE_SIZE
+        ):
+            raise ValueError(f"Invalid PhilipsCondor challenge size: {len(challenge_bytes)} bytes")
+
+        client_id_bytes = base64.b64decode(client_id)
+        client_secret_bytes = base64.b64decode(client_secret)
+        digest = hashlib.sha256(challenge_bytes + client_id_bytes + client_secret_bytes).digest()
+        response = base64.b64encode(client_id_bytes + digest).decode("utf-8")
+        return f"{response_scheme} {response}"
+
+
+class HomeIDAESCrypto:
+    """AES-CBC helper for HomeID local HTTP devices using a persistent hex key."""
+
+    @staticmethod
+    def _hex_to_key(hex_key: str) -> bytes:
+        key = bytes.fromhex(hex_key.strip())
+        if len(key) == 17 and key[0] == 0:
+            key = key[1:]
+        if len(key) != 16:
+            raise ValueError(f"Invalid HomeID AES key length: {len(key)} bytes")
+        return key
+
+    @staticmethod
+    def encrypt(values: Dict[str, Any], hex_key: str) -> bytes:
+        _require_crypto()
+        key = HomeIDAESCrypto._hex_to_key(hex_key)
+        plaintext = json.dumps(values).encode("utf-8")
+        cipher = AES.new(key, AES.MODE_CBC, iv=bytes(16))
+        return base64.b64encode(cipher.encrypt(pad(plaintext, 16, style="pkcs7")))
+
+    @staticmethod
+    def decrypt(data: bytes, hex_key: str) -> str:
+        _require_crypto()
+        key = HomeIDAESCrypto._hex_to_key(hex_key)
+        cipher = AES.new(key, AES.MODE_CBC, iv=bytes(16))
+        plaintext = unpad(cipher.decrypt(base64.b64decode(data.strip())), 16, style="pkcs7")
+        return plaintext.decode("utf-8")
+
+
+class PhilipsHomeIDHTTPClient:
+    """HomeID local HTTP/HTTPS client using PhilipsCondor auth and optional AES."""
+
+    def __init__(
+        self,
+        host: str,
+        use_https: bool = False,
+        client_id: Optional[str] = None,
+        client_secret: Optional[str] = None,
+        encryption_key: Optional[str] = None,
+        product_id: int = 1,
+        protocol_version: int = 1,
+    ):
+        self.host = host
+        self.use_https = use_https
+        self.client_id = client_id
+        self.client_secret = client_secret
+        self.encryption_key = encryption_key
+        self.product_id = product_id
+        self.protocol_version = protocol_version
+        self._credentials: Optional[str] = None
+        self._ssl_context = self._create_ssl_context() if use_https else None
+
+    @staticmethod
+    def _create_ssl_context() -> ssl.SSLContext:
+        context = ssl.create_default_context()
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+        return context
+
+    def _url(self, port_name: str, product_id: Optional[int] = None) -> str:
+        scheme = "https" if self.use_https else "http"
+        pid = self.product_id if product_id is None else product_id
+        return f"{scheme}://{self.host}/di/v{self.protocol_version}/products/{pid}/{port_name}"
+
+    def _headers(self) -> Dict[str, str]:
+        headers = {
+            "Content-Type": "application/json",
+            "Connection": "keep-alive",
+        }
+        if self._credentials:
+            headers["Authorization"] = self._credentials
+        return headers
+
+    def _prepare_body(self, values: Optional[Dict[str, Any]]) -> Optional[bytes]:
+        if values is None:
+            return None
+        if self.encryption_key:
+            return HomeIDAESCrypto.encrypt(values, self.encryption_key)
+        return json.dumps(values).encode("utf-8")
+
+    def _decode_body(self, raw: bytes, port_name: str) -> Dict[str, Any]:
+        text = raw.decode("utf-8")
+        if self.encryption_key:
+            try:
+                text = HomeIDAESCrypto.decrypt(raw, self.encryption_key)
+            except Exception as e:
+                raise ValueError(f"Failed to decrypt HomeID {port_name} response: {e}") from e
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            return {"raw": text}
+
+    def _request(
+        self,
+        method: str,
+        port_name: str,
+        values: Optional[Dict[str, Any]] = None,
+        product_id: Optional[int] = None,
+        retry_auth: bool = True,
+    ) -> Optional[Dict[str, Any]]:
+        request = urllib.request.Request(
+            self._url(port_name, product_id),
+            data=self._prepare_body(values),
+            method=method,
+            headers=self._headers(),
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=10, context=self._ssl_context) as response:
+                return self._decode_body(response.read(), port_name)
+        except urllib.error.HTTPError as e:
+            if e.code == 401 and retry_auth:
+                challenge = e.headers.get("WWW-Authenticate")
+                if not (challenge and self.client_id and self.client_secret):
+                    raise PermissionError(
+                        f"HomeID {method} /{port_name} requires PhilipsCondor credentials"
+                    ) from e
+                self._credentials = PhilipsCondorAuth.create_credentials(
+                    challenge,
+                    self.client_id,
+                    self.client_secret,
+                )
+                return self._request(method, port_name, values, product_id, retry_auth=False)
+            if e.code == 429:
+                raise ConnectionError(f"HomeID {method} /{port_name} failed: device busy (429)") from e
+            if e.code in (404, 501):
+                return None
+            raise ConnectionError(f"HomeID {method} /{port_name} failed with status {e.code}") from e
+        except urllib.error.URLError as e:
+            raise ConnectionError(f"HomeID {method} /{port_name} failed: {e.reason}") from e
+
+    def connect(self):
+        """Validate reachability and fetch an encryption key when credentials allow it."""
+        info = self.get_device_info()
+        if info is None:
+            status = self._request("GET", HOMEID_PORT_STATUS)
+            if status is None:
+                raise ConnectionError("HomeID device did not respond on device or status endpoints")
+        if not self.encryption_key and self.client_id and self.client_secret:
+            self.exchange_encryption_key()
+
+    def exchange_encryption_key(self) -> Optional[str]:
+        result = self._request("GET", HOMEID_PORT_SECURITY, product_id=0)
+        if not result:
+            return None
+        key = result.get("raw") or result.get("key")
+        if key:
+            self.encryption_key = str(key).strip()
+            return self.encryption_key
+        return None
+
+    def get_device_info(self) -> Optional[Dict[str, Any]]:
+        return (
+            self._request("GET", HOMEID_PORT_DEVICE, product_id=1)
+            or self._request("GET", HOMEID_PORT_DEVICE, product_id=0)
+        )
+
+    def get_status(self) -> Dict[str, Any]:
+        merged: Dict[str, Any] = {}
+        got_data = False
+        for port_name in (HOMEID_PORT_STATUS, HOMEID_PORT_AIR, HOMEID_PORT_FLTSTS):
+            result = self._request("GET", port_name)
+            if result:
+                got_data = True
+                merged.update(result)
+        firmware = self._request("GET", HOMEID_PORT_FIRMWARE, product_id=0)
+        if firmware:
+            merged["firmware"] = firmware
+        if not got_data:
+            raise ConnectionError("HomeID status polling returned no status, air, or filter data")
+        return merged
+
+    def set_values(self, values: Dict[str, Any]):
+        result = self._request("PUT", HOMEID_PORT_STATUS, values)
+        if result is None:
+            raise ConnectionError("HomeID control request returned no response")
+
+    def probe(self) -> Dict[str, Any]:
+        result: Dict[str, Any] = {
+            "scheme": "https" if self.use_https else "http",
+            "reachable": False,
+            "endpoints": {},
+        }
+        for product_id in (1, 0):
+            for port_name in (HOMEID_PORT_DEVICE, HOMEID_PORT_STATUS):
+                url = self._url(port_name, product_id)
+                request = urllib.request.Request(url, method="GET", headers={"Content-Type": "application/json"})
+                try:
+                    with urllib.request.urlopen(request, timeout=5, context=self._ssl_context) as response:
+                        result["reachable"] = True
+                        result["endpoints"][f"{product_id}/{port_name}"] = response.status
+                except urllib.error.HTTPError as e:
+                    result["reachable"] = True
+                    result["endpoints"][f"{product_id}/{port_name}"] = e.code
+                except urllib.error.URLError:
+                    result["endpoints"][f"{product_id}/{port_name}"] = None
+        return result
 
 
 class ObserveDaemon:
@@ -237,6 +512,7 @@ class ObserveDaemon:
 
     async def connect(self) -> bool:
         """Connect to the device."""
+        _require_coap()
         if self._client and self._connected:
             return True
         if self._client:
@@ -695,9 +971,122 @@ class HTTPPollingDaemon:
         self._shutdown_event.set()
 
 
-async def run_daemon(host: str, protocol: str = "coap"):
+class HomeIDHTTPPollingDaemon(HTTPPollingDaemon):
+    """Daemon using HomeID local HTTP/HTTPS polling."""
+
+    def __init__(
+        self,
+        host: str,
+        use_https: bool = False,
+        client_id: Optional[str] = None,
+        client_secret: Optional[str] = None,
+        encryption_key: Optional[str] = None,
+    ):
+        self.host = host
+        self.port = 443 if use_https else 80
+        self._client = PhilipsHomeIDHTTPClient(
+            host,
+            use_https=use_https,
+            client_id=client_id,
+            client_secret=client_secret,
+            encryption_key=encryption_key,
+        )
+        self._connected = False
+        self._cached_state: Optional[Dict[str, Any]] = None
+        self._last_update: float = 0
+        self._shutdown_event = asyncio.Event()
+        self._poll_task: Optional[asyncio.Task] = None
+
+    async def _execute_command(self, cmd: str, args: list) -> Any:
+        if cmd == "sensors":
+            if self._cached_state:
+                return parse_status(self._cached_state)
+            for _ in range(50):
+                if self._cached_state:
+                    return parse_status(self._cached_state)
+                await asyncio.sleep(0.1)
+            raise Exception("No state available yet - waiting for device")
+        elif cmd == "status":
+            if self._cached_state:
+                return self._cached_state
+            raise Exception("No state available yet")
+        elif cmd == "power":
+            if args:
+                on = str(args[0]).lower() in ["on", "1", "true"]
+                await self._send_control({"pwr": "1" if on else "0"})
+                return {"power": on}
+            elif self._cached_state:
+                return {"power": parse_status(self._cached_state)["power"]}
+            raise Exception("No state available")
+        elif cmd == "mode":
+            if args:
+                mode = str(args[0]).lower()
+                if mode not in HTTP_MODE_VALUES:
+                    raise ValueError(f"Invalid mode: {mode}")
+                await self._send_control(HTTP_MODE_VALUES[mode])
+                return {"mode": mode}
+            elif self._cached_state:
+                return {"mode": parse_status(self._cached_state)["mode_name"]}
+            raise Exception("No state available")
+        elif cmd == "light":
+            if args:
+                level = int(args[0])
+                if not (0 <= level <= 255):
+                    raise ValueError(f"Light level must be 0-255, got {level}")
+                if level == 0:
+                    device_value = "0"
+                    normalised = LIGHT_OFF
+                elif level <= 50 or level == LIGHT_DIM:
+                    device_value = "50"
+                    normalised = LIGHT_DIM
+                else:
+                    device_value = "100"
+                    normalised = LIGHT_BRIGHT
+                await self._send_control({"aqil": device_value})
+                return {"light": normalised}
+            elif self._cached_state:
+                return {"light": parse_status(self._cached_state)["light_level"]}
+            raise Exception("No state available")
+        elif cmd == "childlock":
+            if args:
+                enabled = str(args[0]).lower() in ["on", "1", "true", "enabled"]
+                await self._send_control({"cl": enabled})
+                return {"child_lock": enabled}
+            elif self._cached_state:
+                return {"child_lock": parse_status(self._cached_state)["child_lock"]}
+            raise Exception("No state available")
+        elif cmd == "ping":
+            return {
+                "connected": self._connected,
+                "observing": False,
+                "has_state": self._cached_state is not None,
+                "last_update": self._last_update
+            }
+        else:
+            raise ValueError(f"Unknown command: {cmd}")
+
+
+async def run_daemon(
+    host: str,
+    protocol: str = "coap",
+    use_https: bool = False,
+    client_id: Optional[str] = None,
+    client_secret: Optional[str] = None,
+    encryption_key: Optional[str] = None,
+):
     """Run the selected daemon protocol."""
-    daemon = HTTPPollingDaemon(host) if protocol == "http" else ObserveDaemon(host)
+    if protocol == "homeid-http":
+        daemon = HomeIDHTTPPollingDaemon(
+            host,
+            use_https=use_https,
+            client_id=client_id,
+            client_secret=client_secret,
+            encryption_key=encryption_key,
+        )
+    elif protocol == "http":
+        daemon = HTTPPollingDaemon(host)
+    else:
+        daemon = ObserveDaemon(host)
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
         try:
@@ -718,6 +1107,7 @@ class PhilipsAirPurifier:
         self._client: Optional[Client] = None
 
     async def connect(self):
+        _require_coap()
         self._client = await Client.create(self.host, self.port)
 
     async def disconnect(self):
@@ -815,17 +1205,36 @@ async def handle_cli_command(host: str, command: str, *args):
         await purifier.disconnect()
 
 
+async def handle_homeid_probe(host: str, use_https: bool = False):
+    """Probe HomeID local HTTP endpoints without authenticating or changing state."""
+    client = PhilipsHomeIDHTTPClient(host, use_https=use_https)
+    result = await asyncio.to_thread(client.probe)
+    print(json.dumps(result, indent=2))
+    return 0 if result.get("reachable") else 1
+
+
 def main():
     parser = argparse.ArgumentParser(description="Philips Air Purifier API helper")
     parser.add_argument("host")
     parser.add_argument("command", nargs="?", default="sensors")
     parser.add_argument("args", nargs="*")
     parser.add_argument("--daemon", action="store_true", help="run as a Homebridge daemon")
-    parser.add_argument("--protocol", choices=["coap", "http"], default="coap")
+    parser.add_argument("--protocol", choices=["coap", "http", "homeid-http"], default="coap")
+    parser.add_argument("--use-https", action="store_true", help="use HTTPS for HomeID local API")
     parsed = parser.parse_args()
 
     if parsed.daemon or parsed.command == "--daemon":
-        asyncio.run(run_daemon(parsed.host, parsed.protocol))
+        asyncio.run(run_daemon(
+            parsed.host,
+            parsed.protocol,
+            use_https=parsed.use_https,
+            client_id=os.environ.get("PHILIPS_HOMEID_CLIENT_ID"),
+            client_secret=os.environ.get("PHILIPS_HOMEID_CLIENT_SECRET"),
+            encryption_key=os.environ.get("PHILIPS_HOMEID_ENCRYPTION_KEY"),
+        ))
+    elif parsed.command == "probe-homeid":
+        exit_code = asyncio.run(handle_homeid_probe(parsed.host, parsed.use_https))
+        sys.exit(exit_code)
     else:
         exit_code = asyncio.run(handle_cli_command(parsed.host, parsed.command, *parsed.args))
         sys.exit(exit_code)
