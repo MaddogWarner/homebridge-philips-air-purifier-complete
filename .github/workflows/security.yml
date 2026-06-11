@@ -1,0 +1,44 @@
+name: Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  security:
+    name: security
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install audit tools
+        run: pip install pip-audit bandit
+
+      - name: pip-audit
+        run: pip-audit || true
+
+      - name: Bandit SAST
+        run: bandit -r . -ll -x ./.git,./node_modules --quiet
+
+      - name: Semgrep
+        run: |
+          pip install semgrep
+          semgrep --config=p/default --config=p/secrets --config=p/owasp-top-ten --error --quiet || true
