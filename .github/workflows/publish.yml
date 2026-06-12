@@ -9,6 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      id-token: write  # Required for npm OIDC trusted publishing
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -18,8 +19,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - run: npm install -g npm@latest  # Trusted publishing requires npm >= 11.5.1
       - run: npm ci
       - run: npm test
-      - run: npm publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - run: npm publish --provenance
+        # No NODE_AUTH_TOKEN — OIDC is used instead; any token value (even empty) blocks OIDC
