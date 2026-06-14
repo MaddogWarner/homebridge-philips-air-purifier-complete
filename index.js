@@ -406,8 +406,8 @@ class PhilipsAirPurifierAccessory {
     }
     try {
       execFileSync(pythonPath, ['-c', PYTHON_RUNTIME_CHECK], { stdio: 'ignore' });
-    } catch (_error) {
-      throw new Error(`pythonPath must point to Python ${PYTHON_MIN_VERSION}+ with aiocoap and pycryptodomex installed: "${pythonPath}"`);
+    } catch (error) {
+      throw new Error(`pythonPath must point to Python ${PYTHON_MIN_VERSION}+ with aiocoap and pycryptodomex installed: "${pythonPath}"`, { cause: error });
     }
   }
 
