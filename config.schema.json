@@ -2,7 +2,7 @@
   "pluginAlias": "PhilipsAirPurifier",
   "pluginType": "platform",
   "singular": true,
-  "headerDisplay": "<p align='center'><img src='https://raw.githubusercontent.com/MaddogWarner/homebridge-philips-air-purifier-complete/main/icon.png' width='150' alt='Philips Air Purifier'></p><div style='margin-top:16px;padding:12px 16px;background:#fff3e0;border-left:4px solid #e88122;border-radius:4px;color:#5d3a00;font-size:14px;'><strong>Device setup is managed in Plugin Settings.</strong><br>The visual Plugin Config form only exposes the platform name because Homebridge renders this plugin's nested device array incorrectly. Use <strong>Plugin Settings</strong> to add or edit CoAP, HTTP, HomeID, and Air+ devices. The <strong>JSON Config</strong> tab remains supported for manual edits.</div>",
+  "headerDisplay": "<p align='center'><img src='https://raw.githubusercontent.com/MaddogWarner/homebridge-philips-air-purifier-complete/main/icon.png' width='150' alt='Philips Air Purifier'></p><div style='margin-top:16px;padding:12px 16px;background:#fff3e0;border-left:4px solid #e88122;border-radius:4px;color:#5d3a00;font-size:14px;'><strong>Device setup is managed in Plugin Settings when available.</strong><br>If Homebridge does not show the Plugin Settings cog, add extra purifiers in <strong>Additional Devices JSON</strong> below or edit the real <strong>devices</strong> array in the JSON Config tab. The nested visual device editor is intentionally disabled because Homebridge renders it incorrectly.</div>",
   "schema": {
     "type": "object",
     "properties": {
@@ -10,6 +10,13 @@
         "title": "Platform Name",
         "type": "string",
         "default": "Philips Air Purifiers"
+      },
+      "additionalDevicesJson": {
+        "title": "Additional Devices JSON",
+        "type": "string",
+        "format": "textarea",
+        "default": "",
+        "description": "Optional fallback when Plugin Settings is unavailable. Paste a JSON array of extra or overriding device entries, for example: [{\"name\":\"Bedroom\",\"host\":\"192.168.1.101\",\"protocol\":\"coap\"}]. Entries with the same host or Air+ UUID override the hidden devices[] entry at runtime."
       }
     }
   }

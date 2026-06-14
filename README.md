@@ -339,7 +339,27 @@ For HomeID/Condor local HTTP devices:
 }
 ```
 
-Use **Plugin Settings** to add, edit, or remove CoAP, HTTP, HomeID, and Air+ cloud devices. The visual **Plugin Config** form only exposes the platform name because the Homebridge UI currently renders this plugin's nested device array incorrectly. The **JSON Config** tab remains supported for manual edits and bulk migration.
+Use **Plugin Settings** to add, edit, or remove CoAP, HTTP, HomeID, and Air+ cloud devices when
+Homebridge exposes the settings cog. Some Homebridge UI states only show the normal **Plugin
+Config** modal; in that case use **Additional Devices JSON** to add extra purifiers without using
+the broken nested visual device editor.
+
+Example **Additional Devices JSON** value:
+
+```json
+[
+  {
+    "name": "Bedroom Air Purifier",
+    "host": "192.168.1.101",
+    "protocol": "coap"
+  }
+]
+```
+
+Entries in **Additional Devices JSON** are merged with the main `devices[]` array at runtime. If an
+entry uses the same `host` or `airplusDeviceUuid` as an existing device, the additional entry
+overrides the existing one. The **JSON Config** tab remains supported for direct edits to the real
+`devices[]` array.
 
 ### Configuration Options
 
@@ -358,6 +378,7 @@ Use **Plugin Settings** to add, edit, or remove CoAP, HTTP, HomeID, and Air+ clo
 | `devices[].airplusDeviceUuid` | Yes for Air+ | — | Philips Air+ device UUID. Filled automatically by the setup wizard. |
 | `devices[].airplusTokenFile` | No | `~/.homebridge/philips-airplus-{uuid}.json` | Token file written by the setup wizard or CLI setup script. |
 | `devices[].pythonPath` | No | Auto-detected | Path to Python 3.12 or newer with `aiocoap` and `pycryptodomex` installed. Leave blank to use the plugin's bundled virtual environment. |
+| `additionalDevicesJson` | No | — | Fallback JSON array used by the normal Plugin Config modal when Plugin Settings is unavailable. Additional entries are merged with `devices[]` at runtime. |
 
 ### Model Compatibility
 

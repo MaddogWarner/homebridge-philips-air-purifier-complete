@@ -75,6 +75,45 @@ module.exports = (api) => {
   api.registerPlatform('PhilipsAirPurifier', PhilipsAirPurifierPlatform);
 };
 
+function resolvePlatformDevices(config, log) {
+  const devices = parseDeviceArray(config.devices, log, 'devices');
+  const additionalDevices = parseDeviceArray(config.additionalDevicesJson, log, 'additionalDevicesJson');
+  return mergeDeviceLists(devices, additionalDevices);
+}
+
+function parseDeviceArray(value, log, fieldName) {
+  if (Array.isArray(value)) return value;
+  if (typeof value !== 'string' || !value.trim()) return [];
+
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed)) return parsed;
+    log.warn(`[PhilipsAir] Ignoring ${fieldName}: expected a JSON array`);
+  } catch (error) {
+    log.warn(`[PhilipsAir] Ignoring ${fieldName}: invalid JSON (${error.message})`);
+  }
+
+  return [];
+}
+
+function mergeDeviceLists(baseDevices, additionalDevices) {
+  const merged = [];
+  const byKey = new Map();
+
+  for (const device of [...baseDevices, ...additionalDevices]) {
+    if (!device || typeof device !== 'object' || Array.isArray(device)) continue;
+    const key = device.airplusDeviceUuid ? `airplus:${device.airplusDeviceUuid}` : device.host ? `host:${device.host}` : '';
+    if (key && byKey.has(key)) {
+      merged[byKey.get(key)] = device;
+    } else {
+      if (key) byKey.set(key, merged.length);
+      merged.push(device);
+    }
+  }
+
+  return merged;
+}
+
 class PhilipsAirPurifierPlatform {
   constructor(log, config, api) {
     this.log = log;
@@ -92,7 +131,7 @@ class PhilipsAirPurifierPlatform {
   }
 
   _discoverDevices() {
-    const devices = this.config.devices || [];
+    const devices = resolvePlatformDevices(this.config, this.log);
     const activeUUIDs = new Set();
 
     for (const deviceConfig of devices) {

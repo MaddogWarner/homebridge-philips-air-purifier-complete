@@ -41,12 +41,13 @@ class AirPlusSetupServer extends HomebridgePluginUiServer {
 
   async handleConfigSave(payload = {}) {
     const platformConfig = await this._loadPlatformConfig();
-    const existingDevices = Array.isArray(platformConfig.devices) ? platformConfig.devices : [];
+    const existingDevices = this._resolveDevices(platformConfig);
     const devices = this._normaliseDevices(payload.devices || [], existingDevices);
 
     platformConfig.platform = PLATFORM_ALIAS;
     platformConfig.name = this._cleanString(payload.name || payload.platformName) || DEFAULT_PLATFORM_NAME;
     platformConfig.devices = devices;
+    delete platformConfig.additionalDevicesJson;
 
     await this._writePlatformConfig(platformConfig);
     return { success: true, config: this._publicConfig(platformConfig) };
@@ -171,7 +172,8 @@ class AirPlusSetupServer extends HomebridgePluginUiServer {
     fs.chmodSync(tokenPath, 0o600);
 
     const platformConfig = await this._loadPlatformConfig();
-    if (!Array.isArray(platformConfig.devices)) platformConfig.devices = [];
+    platformConfig.devices = this._resolveDevices(platformConfig);
+    delete platformConfig.additionalDevicesJson;
     const existing = platformConfig.devices.find((d) => d.airplusDeviceUuid === uuid);
     if (existing) {
       existing.name = name || existing.name || 'Philips Air Purifier';
@@ -201,18 +203,21 @@ class AirPlusSetupServer extends HomebridgePluginUiServer {
       ...platformConfig,
       platform: PLATFORM_ALIAS,
       name: platformConfig.name || DEFAULT_PLATFORM_NAME,
-      devices: Array.isArray(platformConfig.devices) ? platformConfig.devices : [],
+      devices: this._resolveDevices(platformConfig),
     };
   }
 
   async _writePlatformConfig(platformConfig) {
+    const configToWrite = {
+      ...platformConfig,
+      platform: PLATFORM_ALIAS,
+      name: platformConfig.name || DEFAULT_PLATFORM_NAME,
+      devices: Array.isArray(platformConfig.devices) ? platformConfig.devices : [],
+    };
+    delete configToWrite.additionalDevicesJson;
+
     await this.updatePluginConfig([
-      {
-        ...platformConfig,
-        platform: PLATFORM_ALIAS,
-        name: platformConfig.name || DEFAULT_PLATFORM_NAME,
-        devices: Array.isArray(platformConfig.devices) ? platformConfig.devices : [],
-      },
+      configToWrite,
     ]);
     await this.savePluginConfig();
   }
@@ -253,6 +258,43 @@ class AirPlusSetupServer extends HomebridgePluginUiServer {
       const existing = existingByKey.get(device._uiKey) || {};
       return this._normaliseDevice(device, existing, index);
     });
+  }
+
+  _resolveDevices(platformConfig) {
+    const devices = this._parseDeviceArray(platformConfig.devices, 'devices');
+    const additionalDevices = this._parseDeviceArray(platformConfig.additionalDevicesJson, 'additionalDevicesJson');
+    return this._mergeDeviceLists(devices, additionalDevices);
+  }
+
+  _parseDeviceArray(value, fieldName) {
+    if (Array.isArray(value)) return value;
+    if (typeof value !== 'string' || !value.trim()) return [];
+
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) return parsed;
+      throw new Error('expected a JSON array');
+    } catch (error) {
+      throw new Error(`${fieldName} must be a valid JSON array (${error.message})`);
+    }
+  }
+
+  _mergeDeviceLists(baseDevices, additionalDevices) {
+    const merged = [];
+    const byKey = new Map();
+
+    for (const device of [...baseDevices, ...additionalDevices]) {
+      if (!device || typeof device !== 'object' || Array.isArray(device)) continue;
+      const key = device.airplusDeviceUuid ? `airplus:${device.airplusDeviceUuid}` : device.host ? `host:${device.host}` : '';
+      if (key && byKey.has(key)) {
+        merged[byKey.get(key)] = device;
+      } else {
+        if (key) byKey.set(key, merged.length);
+        merged.push(device);
+      }
+    }
+
+    return merged;
   }
 
   _normaliseDevice(device, existing, index) {

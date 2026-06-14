@@ -6,6 +6,19 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [3.1.1] — 14/06/2026
+
+### Added
+
+- Added an **Additional Devices JSON** fallback field to the normal Plugin Config modal so users can
+  add or override purifier entries when Homebridge does not expose the custom Plugin Settings cog.
+
+### Fixed
+
+- Added clear validation errors for malformed **Additional Devices JSON** in the custom UI server.
+
+---
+
 ## [3.1.0] — 14/06/2026
 
 ### Added
