@@ -71,6 +71,7 @@ import aiocoap, Cryptodome
 `;
 
 module.exports = (api) => {
+  api.registerAccessory('PhilipsAirPurifier', PhilipsAirPurifierLegacyAccessory);
   api.registerPlatform('PhilipsAirPurifier', PhilipsAirPurifierPlatform);
 };
 
@@ -487,6 +488,12 @@ class PhilipsAirPurifierAccessory {
   }
 
   async startDaemon() {
+    if (this.protocol === 'airplus-cloud' && !this.airplusDeviceUuid) {
+      this.log.warn('airplus-cloud requires airplusDeviceUuid. Use Plugin Settings to run the Air+ Setup Wizard, or set airplusDeviceUuid manually.');
+      this.deviceReachable = false;
+      return;
+    }
+
     try {
       const connected = await this.daemon.start(this.pythonPath, this.apiScriptPath, this.host, {
         protocol: this.protocol,
@@ -826,5 +833,46 @@ class PhilipsAirPurifierAccessory {
 
   destroy() {
     this.daemon.stop();
+  }
+}
+
+class PhilipsAirPurifierLegacyAccessory extends PhilipsAirPurifierAccessory {
+  constructor(log, config, api) {
+    log.warn('[PhilipsAir] Legacy accessory config detected. v3 uses a platform config under platforms[].devices[]. See the README migration guide.');
+    super(log, config, api, new LegacyPlatformAccessory(api));
+  }
+
+  getServices() {
+    return this.platformAcc.getServices();
+  }
+}
+
+class LegacyPlatformAccessory {
+  constructor(api) {
+    this.Service = api.hap.Service;
+    this.services = [];
+    this.context = {};
+    this.informationService = new this.Service.AccessoryInformation();
+    this.services.push(this.informationService);
+  }
+
+  getService(serviceType) {
+    return this.services.find((service) => service instanceof serviceType);
+  }
+
+  getServiceById(serviceType, subtype) {
+    return this.services.find((service) => service instanceof serviceType && service.subtype === subtype);
+  }
+
+  addService(serviceOrType, name, subtype) {
+    const service = typeof serviceOrType === 'function'
+      ? new serviceOrType(name, subtype)
+      : serviceOrType;
+    this.services.push(service);
+    return service;
+  }
+
+  getServices() {
+    return this.services;
   }
 }

@@ -6,6 +6,20 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [3.0.1] — 14/06/2026
+
+### Fixed
+
+- Restored temporary legacy accessory registration so existing `accessories[]` config entries
+  continue to load during migration instead of producing `No plugin was found for the accessory`.
+- Simplified the platform config schema rendering by removing the custom `devices[]` layout that
+  could duplicate and overlap fields in the Homebridge UI.
+- Stopped `airplus-cloud` devices without `airplusDeviceUuid` from entering a daemon restart loop.
+  The plugin now logs a configuration warning and waits for the Air+ Setup Wizard or manual UUID
+  configuration.
+
+---
+
 ## [3.0.0] — 14/06/2026
 
 ### Breaking Changes

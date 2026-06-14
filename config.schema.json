@@ -88,36 +88,5 @@
         }
       }
     }
-  },
-  "layout": [
-    {
-      "key": "name"
-    },
-    {
-      "key": "devices",
-      "type": "array",
-      "title": "Devices",
-      "buttonText": "Add Device",
-      "items": [
-        "devices[].name",
-        "devices[].host",
-        "devices[].protocol",
-        {
-          "type": "fieldset",
-          "title": "Advanced Settings",
-          "expandable": true,
-          "expanded": false,
-          "items": [
-            "devices[].useHttps",
-            "devices[].clientId",
-            "devices[].clientSecret",
-            "devices[].encryptionKey",
-            "devices[].airplusDeviceUuid",
-            "devices[].airplusTokenFile",
-            "devices[].pythonPath"
-          ]
-        }
-      ]
-    }
-  ]
+  }
 }
