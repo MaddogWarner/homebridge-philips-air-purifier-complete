@@ -70,6 +70,32 @@ class ParseStatusTests(unittest.TestCase):
         self.assertEqual(sensors["humidity"], 48)
 
 
+class AirPlusParsStatusTests(unittest.TestCase):
+    def test_airplus_d0310d_normalised_to_power(self):
+        """D0310D (Air+ MQTT power) is normalised to D03102 so parse_status picks it up."""
+        raw = {"D0310D": 1, "D0310C": 18, "D03221": 8}
+        result = parse_status(raw)
+        self.assertTrue(result["power"])
+        self.assertEqual(result["mode"], "turbo")
+        self.assertEqual(result["pm25"], 8)
+
+    def test_airplus_ac0650_auto_mode_value_1(self):
+        """AC0650 reports auto as D0310C=1, not 0 — must parse as 'auto' not 'unknown'."""
+        raw = {"D0310D": 1, "D0310C": 1, "D03221": 5}
+        result = parse_status(raw)
+        self.assertTrue(result["power"])
+        self.assertEqual(result["mode"], "auto")
+        self.assertEqual(result["pm25"], 5)
+
+    def test_airplus_d0310d_does_not_overwrite_existing_d03102(self):
+        """If D03102 is already present, D0310D must not clobber it."""
+        raw = {"D0310D": 0, "D03102": 1, "D0310C": 19}
+        result = parse_status(raw)
+        # D03102=1 wins; D0310D=0 is ignored
+        self.assertTrue(result["power"])
+        self.assertEqual(result["mode"], "medium")
+
+
 class HomeIDCryptoTests(unittest.TestCase):
     def test_homeid_aes_round_trip(self):
         if not CRYPTO_AVAILABLE:

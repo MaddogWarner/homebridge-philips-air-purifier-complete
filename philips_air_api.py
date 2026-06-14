@@ -42,6 +42,21 @@ except ModuleNotFoundError:
     Client = None
     COAP_AVAILABLE = False
 
+try:
+    import paho.mqtt.client as _paho_mqtt
+except ImportError:
+    _paho_mqtt = None
+
+
+# Air+ cloud MQTT constants
+_AIRPLUS_API_BASE = "https://prod.eu-da.iot.versuni.com/api"
+_AIRPLUS_OIDC_TOKEN_URL = "https://cdc.accounts.home.id/oidc/op/v1.0/4_JGZWlP8eQHpEqkvQElolbA/token"
+_AIRPLUS_CLIENT_ID = "-XsK7O6iEkLml77yDGDUi0ku"
+_AIRPLUS_MQTT_HOST = "ats.prod.eu-da.iot.versuni.com"
+_AIRPLUS_MQTT_PORT = 443
+_AIRPLUS_MQTT_PATH = "/mqtt"
+_AIRPLUS_USER_AGENT = "okhttp/4.12.0 (Android 14; Pixel 7)"
+
 
 # Constants
 PARAM_POWER = "D03102"
@@ -74,6 +89,7 @@ HOMEID_PORT_FIRMWARE = "firmware"
 
 MODE_NAMES = {
     MODE_AUTO: "auto",
+    1: "auto",       # Air+ MQTT AC0650 reports auto as 1 (not 0)
     MODE_SLEEP: "sleep",
     MODE_MEDIUM: "medium",
     MODE_TURBO: "turbo",
@@ -162,8 +178,13 @@ def _normalise_light(status: Dict[str, Any]) -> int:
     return LIGHT_BRIGHT
 
 
-def parse_status(status: Dict[str, Any]) -> Dict[str, Any]:
+def parse_status(raw: Dict[str, Any]) -> Dict[str, Any]:
     """Parse raw device status into normalised sensor data."""
+    # Normalise Air+ MQTT power field: D0310D → D03102 (same semantics)
+    if "D0310D" in raw and "D03102" not in raw:
+        raw = dict(raw)
+        raw["D03102"] = raw["D0310D"]
+    status = raw
     filter_total = status.get("D05408", 9600)
     filter_remaining = status.get("D0540E", filter_total)
     filter_life_percent = (filter_remaining / filter_total * 100) if filter_total > 0 else 0
@@ -494,6 +515,188 @@ class PhilipsHomeIDHTTPClient:
                 except urllib.error.URLError:
                     result["endpoints"][f"{product_id}/{port_name}"] = None
         return result
+
+
+class AirPlusCloudClient:
+    """MQTT-over-WSS client for Philips Air+ cloud devices (AWS IoT)."""
+
+    def __init__(self, device_uuid: str, token_file: str):
+        if _paho_mqtt is None:
+            raise ImportError(
+                "paho-mqtt is required for airplus-cloud protocol. "
+                "Run: pip install 'paho-mqtt>=2.1'"
+            )
+        self._uuid = device_uuid
+        self._device_id = f"da-{device_uuid}" if not device_uuid.startswith("da-") else device_uuid
+        self._token_file = token_file
+        self._tokens: Dict[str, Any] = {}
+        self._mqtt: Optional[_paho_mqtt.Client] = None
+        self._connected = False
+        import queue as _queue_module
+        import threading
+        self._state_queue: _queue_module.Queue = _queue_module.Queue()
+        self._ready = threading.Event()
+
+    def _load_tokens(self):
+        with open(self._token_file) as f:
+            self._tokens = json.load(f)
+
+    def _save_tokens(self):
+        tmp = self._token_file + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(self._tokens, f, indent=2)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, self._token_file)
+        os.chmod(self._token_file, 0o600)
+
+    def _api_get(self, path: str) -> Dict[str, Any]:
+        req = urllib.request.Request(
+            f"{_AIRPLUS_API_BASE}{path}",
+            headers={
+                "Authorization": f"Bearer {self._tokens['access_token']}",
+                "User-Agent": _AIRPLUS_USER_AGENT,
+                "Accept": "application/json",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return json.loads(r.read())
+
+    def _refresh_token(self):
+        import urllib.parse
+        data = urllib.parse.urlencode({
+            "grant_type": "refresh_token",
+            "refresh_token": self._tokens["refresh_token"],
+            "client_id": self._tokens.get("client_id", _AIRPLUS_CLIENT_ID),
+        }).encode()
+        req = urllib.request.Request(
+            _AIRPLUS_OIDC_TOKEN_URL,
+            data=data,
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+                "User-Agent": _AIRPLUS_USER_AGENT,
+                "Accept": "application/json",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=10) as r:
+            resp = json.loads(r.read())
+        self._tokens["access_token"] = resp["access_token"]
+        if "refresh_token" in resp:
+            self._tokens["refresh_token"] = resp["refresh_token"]
+        self._tokens["expires_at"] = time.time() + resp.get("expires_in", 3600)
+        self._save_tokens()
+
+    def _ensure_token(self):
+        expires_at = self._tokens.get("expires_at", 0)
+        if time.time() + 300 > expires_at:  # refresh 5 minutes early
+            self._refresh_token()
+
+    def _fetch_signature(self) -> str:
+        try:
+            return self._api_get("/da/user/self/signature")["signature"]
+        except Exception:
+            self._refresh_token()
+            return self._api_get("/da/user/self/signature")["signature"]
+
+    def connect(self):
+        self._load_tokens()
+        self._ensure_token()
+        signature = self._fetch_signature()
+
+        client = _paho_mqtt.Client(
+            client_id=f"hb-{self._uuid[:8]}",
+            transport="websockets",
+        )
+        client.tls_set_context(ssl.create_default_context())
+        client.ws_set_options(
+            path=_AIRPLUS_MQTT_PATH,
+            headers={
+                "x-amz-customauthorizer-name": "CustomAuthorizer",
+                "x-amz-customauthorizer-signature": signature,
+                "tenant": "da",
+                "token-header": f"Bearer {self._tokens['access_token']}",
+                "Sec-WebSocket-Protocol": "mqtt",
+            },
+        )
+        client.on_connect = self._on_connect
+        client.on_message = self._on_message
+        client.on_disconnect = self._on_disconnect
+        client.connect(_AIRPLUS_MQTT_HOST, _AIRPLUS_MQTT_PORT, keepalive=60)
+        client.loop_start()
+        self._mqtt = client
+        # Wait for connection (up to 15s)
+        if not self._ready.wait(timeout=15):
+            raise ConnectionError("MQTT connection timed out")
+
+    def _on_connect(self, client, userdata, flags, rc, properties=None):
+        if rc == 0:
+            self._connected = True
+            inbound = f"da_ctrl/{self._device_id}/from_ncp"
+            client.subscribe(inbound, qos=0)
+            # Request initial status
+            client.publish(
+                f"da_ctrl/{self._device_id}/to_ncp",
+                '{"cn":"getPort","data":{"portName":"Status"}}',
+                qos=0,
+            )
+            self._ready.set()
+        else:
+            self._connected = False
+
+    def _on_message(self, client, userdata, msg):
+        try:
+            data = json.loads(msg.payload.decode())
+            payload = data.get("data", {})
+            if isinstance(payload, dict):
+                props = payload.get("properties", {})
+                port = payload.get("portName", "")
+                if port == "Status" and props:
+                    self._state_queue.put(dict(props))
+        except Exception:
+            pass
+
+    def _on_disconnect(self, client, userdata, rc, properties=None):
+        self._connected = False
+
+    def get_status_queue(self):
+        return self._state_queue
+
+    def set_values(self, values: Dict[str, Any]):
+        if not self._mqtt or not self._connected:
+            return
+        control_topic = f"da_ctrl/{self._device_id}/to_ncp"
+        shadow_topic = f"$aws/things/{self._device_id}/shadow/update"
+
+        _MODE_TO_DCODE = {
+            "auto": 1, "sleep": 17, "turbo": 18, "medium": 19,
+        }
+
+        props: Dict[str, Any] = {}
+        for key, val in values.items():
+            if key == "power":
+                shadow = json.dumps({"state": {"desired": {"powerOn": bool(val)}}})
+                self._mqtt.publish(shadow_topic, shadow, qos=0)
+            elif key == "mode" and isinstance(val, str):
+                code = _MODE_TO_DCODE.get(val.lower())
+                if code is not None:
+                    props["D0310C"] = code
+            elif key == "light_level":
+                props["D03104"] = int(val)
+            elif key == "child_lock":
+                props["D03103"] = 1 if val else 0
+
+        if props:
+            cmd = json.dumps({
+                "cn": "setPort",
+                "data": {"portName": "Control", "properties": props},
+            })
+            self._mqtt.publish(control_topic, cmd, qos=0)
+
+    def disconnect(self):
+        if self._mqtt:
+            self._mqtt.loop_stop()
+            self._mqtt.disconnect()
+            self._mqtt = None
 
 
 class ObserveDaemon:
@@ -1066,6 +1269,169 @@ class HomeIDHTTPPollingDaemon(HTTPPollingDaemon):
             raise ValueError(f"Unknown command: {cmd}")
 
 
+class AirPlusCloudDaemon:
+    """Daemon using Philips Air+ MQTT-over-WSS cloud API."""
+
+    def __init__(self, device_uuid: str, token_file: str):
+        self._uuid = device_uuid
+        self._token_file = token_file
+        self._client: Optional[AirPlusCloudClient] = None
+        self._shutdown_event = asyncio.Event()
+
+    def shutdown(self):
+        self._shutdown_event.set()
+
+    def _log(self, event: str, message: str):
+        print(json.dumps({
+            "type": "log",
+            "event": event,
+            "message": message,
+        }), flush=True)
+
+    async def start(self):
+        try:
+            self._client = AirPlusCloudClient(self._uuid, self._token_file)
+            await asyncio.to_thread(self._client.connect)
+            print(json.dumps({
+                "type": "ready",
+                "connected": True,
+                "host": "cloud",
+            }), flush=True)
+        except Exception as e:
+            print(json.dumps({
+                "type": "ready",
+                "connected": False,
+                "host": "cloud",
+                "error": str(e),
+            }), flush=True)
+            return
+
+        await asyncio.gather(self._state_loop(), self._process_commands())
+        if self._client:
+            await asyncio.to_thread(self._client.disconnect)
+        print(json.dumps({"type": "shutdown"}), flush=True)
+
+    async def _state_loop(self):
+        import queue as _queue_module
+        q = self._client.get_status_queue()
+        while not self._shutdown_event.is_set():
+            try:
+                raw = await asyncio.to_thread(q.get, True, 1.0)
+                state = parse_status(raw)
+                print(json.dumps({
+                    "type": "update",
+                    "data": state,
+                    "timestamp": time.time(),
+                }), flush=True)
+            except _queue_module.Empty:
+                pass
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                self._log("state_error", f"State processing error: {e}")
+                await asyncio.sleep(0.1)
+
+    async def _process_commands(self):
+        """Process commands from stdin — same pattern as HTTPPollingDaemon."""
+        loop = asyncio.get_running_loop()
+        reader = asyncio.StreamReader()
+        reader_protocol = asyncio.StreamReaderProtocol(reader)
+        await loop.connect_read_pipe(lambda: reader_protocol, sys.stdin)
+
+        while not self._shutdown_event.is_set():
+            try:
+                line_task = asyncio.create_task(reader.readline())
+                shutdown_task = asyncio.create_task(self._shutdown_event.wait())
+                done, pending = await asyncio.wait(
+                    [line_task, shutdown_task],
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                for task in pending:
+                    task.cancel()
+                if self._shutdown_event.is_set():
+                    break
+                line = line_task.result()
+                if not line:
+                    break
+                line = line.decode("utf-8").strip()
+                if not line:
+                    continue
+                try:
+                    request = json.loads(line)
+                    await self._handle_request(request)
+                except json.JSONDecodeError as e:
+                    print(json.dumps({
+                        "success": False,
+                        "error": f"Invalid JSON: {e}",
+                    }), flush=True)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                print(json.dumps({
+                    "type": "error",
+                    "error": str(e),
+                }), flush=True)
+
+    async def _handle_request(self, request: dict):
+        request_id = request.get("id")
+        cmd = request.get("cmd", "")
+        args = request.get("args", [])
+        try:
+            result = await self._execute_command(cmd, args)
+            print(json.dumps({
+                "id": request_id,
+                "success": True,
+                "data": result,
+            }), flush=True)
+        except Exception as e:
+            print(json.dumps({
+                "id": request_id,
+                "success": False,
+                "error": str(e),
+            }), flush=True)
+
+    async def _execute_command(self, cmd: str, args: list) -> Any:
+        if cmd == "ping":
+            return {
+                "connected": self._client._connected if self._client else False,
+                "observing": True,
+                "has_state": True,
+                "last_update": time.time(),
+            }
+        elif cmd == "power":
+            if args:
+                on = str(args[0]).lower() in ["on", "1", "true"]
+                if self._client:
+                    await asyncio.to_thread(self._client.set_values, {"power": on})
+                return {"power": on}
+            raise Exception("No args provided for power command")
+        elif cmd == "mode":
+            if args:
+                mode = str(args[0]).lower()
+                if mode not in MODE_VALUES:
+                    raise ValueError(f"Invalid mode: {mode}")
+                if self._client:
+                    await asyncio.to_thread(self._client.set_values, {"mode": mode})
+                return {"mode": mode}
+            raise Exception("No args provided for mode command")
+        elif cmd == "light":
+            if args:
+                level = int(args[0])
+                if self._client:
+                    await asyncio.to_thread(self._client.set_values, {"light_level": level})
+                return {"light": level}
+            raise Exception("No args provided for light command")
+        elif cmd == "childlock":
+            if args:
+                enabled = str(args[0]).lower() in ["on", "1", "true", "enabled"]
+                if self._client:
+                    await asyncio.to_thread(self._client.set_values, {"child_lock": enabled})
+                return {"child_lock": enabled}
+            raise Exception("No args provided for childlock command")
+        else:
+            raise ValueError(f"Unknown command: {cmd}")
+
+
 async def run_daemon(
     host: str,
     protocol: str = "coap",
@@ -1219,19 +1585,43 @@ def main():
     parser.add_argument("command", nargs="?", default="sensors")
     parser.add_argument("args", nargs="*")
     parser.add_argument("--daemon", action="store_true", help="run as a Homebridge daemon")
-    parser.add_argument("--protocol", choices=["coap", "http", "homeid-http"], default="coap")
+    parser.add_argument(
+        "--protocol",
+        choices=["coap", "http", "homeid-http", "airplus-cloud"],
+        default="coap",
+    )
     parser.add_argument("--use-https", action="store_true", help="use HTTPS for HomeID local API")
+    parser.add_argument(
+        "--device-uuid",
+        help="Air+ device UUID (airplus-cloud protocol only)",
+    )
+    parser.add_argument(
+        "--token-file",
+        help="Path to token JSON file (airplus-cloud protocol only)",
+    )
     parsed = parser.parse_args()
 
     if parsed.daemon or parsed.command == "--daemon":
-        asyncio.run(run_daemon(
-            parsed.host,
-            parsed.protocol,
-            use_https=parsed.use_https,
-            client_id=os.environ.get("PHILIPS_HOMEID_CLIENT_ID"),
-            client_secret=os.environ.get("PHILIPS_HOMEID_CLIENT_SECRET"),
-            encryption_key=os.environ.get("PHILIPS_HOMEID_ENCRYPTION_KEY"),
-        ))
+        if parsed.protocol == "airplus-cloud":
+            if not parsed.device_uuid or not parsed.token_file:
+                sys.exit("--device-uuid and --token-file are required for airplus-cloud protocol")
+            daemon = AirPlusCloudDaemon(parsed.device_uuid, parsed.token_file)
+            loop = asyncio.get_event_loop()
+            for sig in (signal.SIGINT, signal.SIGTERM):
+                try:
+                    loop.add_signal_handler(sig, daemon.shutdown)
+                except NotImplementedError:
+                    pass
+            asyncio.run(daemon.start())
+        else:
+            asyncio.run(run_daemon(
+                parsed.host,
+                parsed.protocol,
+                use_https=parsed.use_https,
+                client_id=os.environ.get("PHILIPS_HOMEID_CLIENT_ID"),
+                client_secret=os.environ.get("PHILIPS_HOMEID_CLIENT_SECRET"),
+                encryption_key=os.environ.get("PHILIPS_HOMEID_ENCRYPTION_KEY"),
+            ))
     elif parsed.command == "probe-homeid":
         exit_code = asyncio.run(handle_homeid_probe(parsed.host, parsed.use_https))
         sys.exit(exit_code)
