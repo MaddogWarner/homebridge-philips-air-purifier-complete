@@ -7,6 +7,7 @@ module.exports = [
       '.venv/**',
       'venv/**',
       'node_modules/**',
+      '.claude/**',
     ],
   },
   js.configs.recommended,
