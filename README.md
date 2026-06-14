@@ -339,7 +339,7 @@ For HomeID/Condor local HTTP devices:
 }
 ```
 
-Or configure via the Homebridge UI — fill in **Name** and **IP Address**, and set **Protocol** to `http` for AC1xxx DH/AES models or `homeid-http` for HomeID/Condor local HTTP devices.
+For CoAP, HTTP, and HomeID devices, configure the `devices` array in the Homebridge **JSON Config** tab. The visual Plugin Config form only exposes the platform name because the Homebridge UI currently renders this plugin's nested device array incorrectly. For Air+ cloud devices, use **Plugin Settings** to run the setup wizard.
 
 ### Configuration Options
 

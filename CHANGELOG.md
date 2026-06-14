@@ -6,6 +6,17 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [3.0.3] — 14/06/2026
+
+### Fixed
+
+- Removed `devices[]` from the config schema so the Homebridge visual Plugin Config form no
+  longer renders an incorrect nested array editor. Devices are configured via the **JSON Config**
+  tab; the visual form now only exposes the platform name. The `headerDisplay` banner and README
+  are updated to direct users accordingly.
+
+---
+
 ## [3.0.2] — 14/06/2026
 
 ### Fixed
