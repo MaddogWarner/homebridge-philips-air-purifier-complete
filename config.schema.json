@@ -2,7 +2,7 @@
   "pluginAlias": "PhilipsAirPurifier",
   "pluginType": "accessory",
   "singular": false,
-  "headerDisplay": "<p align='center'><img src='https://raw.githubusercontent.com/MadDogWarner/homebridge-philips-air-purifier-complete/main/icon.png' width='150' alt='Philips Air Purifier'></p>",
+  "headerDisplay": "<p align='center'><img src='https://raw.githubusercontent.com/MaddogWarner/homebridge-philips-air-purifier-complete/main/icon.png' width='150' alt='Philips Air Purifier'></p><div style='margin-top:16px;padding:12px 16px;background:#fff3e0;border-left:4px solid #e88122;border-radius:4px;color:#5d3a00;font-size:14px;'><strong>Setting up an Air+ cloud device (AC0650 / AC1715)?</strong><br>Click <strong>Settings</strong> on the plugin card (gear icon at top-right of this panel) to open the Air+ Setup Wizard. The wizard saves your token and fills in the UUID automatically &mdash; you should not need to edit those fields by hand.</div>",
   "schema": {
     "type": "object",
     "properties": {
@@ -59,13 +59,13 @@
         "title": "Air+ Device UUID",
         "type": "string",
         "required": false,
-        "description": "UUID from running 'python scripts/airplus_setup.py'. Required for airplus-cloud protocol."
+        "description": "Device UUID — filled in automatically by the Air+ Setup Wizard (Plugin Settings → gear icon). Only enter manually if you ran scripts/airplus_setup.py from the command line."
       },
       "airplusTokenFile": {
         "title": "Air+ Token File Path",
         "type": "string",
         "required": false,
-        "description": "Path to tokens JSON from airplus_setup.py. Defaults to ~/.homebridge/philips-airplus-{uuid}.json if omitted."
+        "description": "Path to the token file. Set automatically by the Air+ Setup Wizard. Leave blank to use the default ~/.homebridge/philips-airplus-{uuid}.json location."
       },
       "pythonPath": {
         "title": "Python Path (Optional)",

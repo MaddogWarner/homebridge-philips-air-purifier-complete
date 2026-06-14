@@ -6,6 +6,17 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [2.4.1] — 14/06/2026
+
+### Fixed
+
+- Added a prominent callout in the per-accessory config form directing Air+ cloud users to the
+  Air+ Setup Wizard (Plugin Settings → gear icon). The wizard was already present but not
+  discoverable from the accessory configuration form.
+- Corrected icon URL capitalisation in `config.schema.json` (MadDogWarner → MaddogWarner).
+
+---
+
 ## [2.4.0] — 14/06/2026
 
 ### Added
