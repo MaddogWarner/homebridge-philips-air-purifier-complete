@@ -1,7 +1,7 @@
 # homebridge-philips-air-purifier-complete
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/MadDogWarner/homebridge-philips-air-purifier-complete/main/icon.png" width="200" alt="Philips Air Purifier">
+  <img src="https://raw.githubusercontent.com/MaddogWarner/homebridge-philips-air-purifier-complete/main/icon.png" width="200" alt="Philips Air Purifier">
 </p>
 
 <p align="center">
@@ -105,17 +105,64 @@ bash $(npm root -g)/homebridge-philips-air-purifier-complete/postinstall.sh
 
 ---
 
+## Migrating from v2.x to v3.0.0
+
+v3.0.0 changes the plugin type from `accessory` to `platform`. Update your Homebridge
+`config.json` before restarting Homebridge.
+
+1. Move device entries from `"accessories"` into `"platforms"[0]."devices"`:
+
+   **Before:**
+
+   ```json
+   {
+     "accessories": [
+       { "accessory": "PhilipsAirPurifier", "name": "Bedroom", "host": "192.168.1.100" }
+     ]
+   }
+   ```
+
+   **After:**
+
+   ```json
+   {
+     "platforms": [
+       {
+         "platform": "PhilipsAirPurifier",
+         "name": "Philips Air Purifiers",
+         "devices": [
+           { "name": "Bedroom", "host": "192.168.1.100" }
+         ]
+       }
+     ]
+   }
+   ```
+
+2. Remove the `"accessory": "PhilipsAirPurifier"` key from each device entry.
+
+3. Restart Homebridge.
+
+**Note:** HomeKit will treat migrated devices as new accessories. Re-add them to rooms,
+scenes, and automations in the Home app.
+
+---
+
 ## Configuration
 
-Add to your Homebridge `config.json` under `"accessories"`:
+Add to your Homebridge `config.json` under `"platforms"`:
 
 ```json
 {
-  "accessories": [
+  "platforms": [
     {
-      "accessory": "PhilipsAirPurifier",
-      "name": "Living Room Air Purifier",
-      "host": "192.168.1.100"
+      "platform": "PhilipsAirPurifier",
+      "name": "Philips Air Purifiers",
+      "devices": [
+        {
+          "name": "Living Room Air Purifier",
+          "host": "192.168.1.100"
+        }
+      ]
     }
   ]
 }
@@ -125,12 +172,17 @@ For AC1xxx models that use HTTP:
 
 ```json
 {
-  "accessories": [
+  "platforms": [
     {
-      "accessory": "PhilipsAirPurifier",
-      "name": "Bedroom Air Purifier",
-      "host": "192.168.1.101",
-      "protocol": "http"
+      "platform": "PhilipsAirPurifier",
+      "name": "Philips Air Purifiers",
+      "devices": [
+        {
+          "name": "Bedroom Air Purifier",
+          "host": "192.168.1.101",
+          "protocol": "http"
+        }
+      ]
     }
   ]
 }
@@ -140,15 +192,20 @@ For HomeID/Condor local HTTP devices:
 
 ```json
 {
-  "accessories": [
+  "platforms": [
     {
-      "accessory": "PhilipsAirPurifier",
-      "name": "Study Air Purifier",
-      "host": "192.168.1.102",
-      "protocol": "homeid-http",
-      "useHttps": true,
-      "clientId": "BASE64_CLIENT_ID",
-      "clientSecret": "BASE64_CLIENT_SECRET"
+      "platform": "PhilipsAirPurifier",
+      "name": "Philips Air Purifiers",
+      "devices": [
+        {
+          "name": "Study Air Purifier",
+          "host": "192.168.1.102",
+          "protocol": "homeid-http",
+          "useHttps": true,
+          "clientId": "BASE64_CLIENT_ID",
+          "clientSecret": "BASE64_CLIENT_SECRET"
+        }
+      ]
     }
   ]
 }
@@ -160,14 +217,19 @@ Or configure via the Homebridge UI — fill in **Name** and **IP Address**, and 
 
 | Option | Required | Default | Description |
 |--------|----------|---------|-------------|
-| `name` | Yes | — | Name shown in HomeKit |
-| `host` | Yes | — | IPv4 address of your air purifier |
-| `protocol` | No | `coap` | Communication protocol. Use `http` for AC1xxx DH/AES models or `homeid-http` for HomeID/Condor local HTTP devices. |
-| `useHttps` | No | `false` | Use HTTPS for `homeid-http` devices with self-signed certificates. Ignored for `coap` and `http`. |
-| `clientId` | No | — | Base64 HomeID local API client ID for PhilipsCondor challenge authentication. |
-| `clientSecret` | No | — | Base64 HomeID local API client secret for PhilipsCondor challenge authentication. |
-| `encryptionKey` | No | Auto-fetched when possible | Optional hex AES key for HomeID encrypted payloads. Leave blank unless you already know it. |
-| `pythonPath` | No | Auto-detected | Path to Python 3.12 or newer with `aiocoap` and `pycryptodomex` installed. Leave blank to use the plugin's bundled virtual environment. |
+| `platform` | Yes | — | Must be `PhilipsAirPurifier` in the platform entry. |
+| `name` | No | `Philips Air Purifiers` | Platform name for the Homebridge UI. |
+| `devices` | Yes | `[]` | Array of purifier device entries. |
+| `devices[].name` | Yes | — | Name shown in HomeKit. |
+| `devices[].host` | Yes, except Air+ | — | IPv4 address of your purifier. Use `cloud` for `airplus-cloud`. |
+| `devices[].protocol` | No | `coap` | Communication protocol. Use `http` for AC1xxx DH/AES models, `homeid-http` for HomeID/Condor local HTTP devices, or `airplus-cloud` for Philips Air+ cloud devices. |
+| `devices[].useHttps` | No | `false` | Use HTTPS for `homeid-http` devices with self-signed certificates. Ignored for `coap` and `http`. |
+| `devices[].clientId` | No | — | Base64 HomeID local API client ID for PhilipsCondor challenge authentication. |
+| `devices[].clientSecret` | No | — | Base64 HomeID local API client secret for PhilipsCondor challenge authentication. |
+| `devices[].encryptionKey` | No | Auto-fetched when possible | Optional hex AES key for HomeID encrypted payloads. Leave blank unless you already know it. |
+| `devices[].airplusDeviceUuid` | Yes for Air+ | — | Philips Air+ device UUID. Filled automatically by the setup wizard. |
+| `devices[].airplusTokenFile` | No | `~/.homebridge/philips-airplus-{uuid}.json` | Token file written by the setup wizard or CLI setup script. |
+| `devices[].pythonPath` | No | Auto-detected | Path to Python 3.12 or newer with `aiocoap` and `pycryptodomex` installed. Leave blank to use the plugin's bundled virtual environment. |
 
 ### Model Compatibility
 
@@ -176,8 +238,9 @@ Or configure via the Homebridge UI — fill in **Name** and **IP Address**, and 
 | `coap` (default) | AC2xxx, AC3xxx, AC4xxx | CoAP Observe push updates |
 | `http` | AC1xxx DH/AES models (e.g. AC1715) | HTTP polling every 10 seconds via `/air` |
 | `homeid-http` | HomeID/Condor local HTTP devices | HTTP/HTTPS polling every 10 seconds via `/status`, `/air`, and `/fltsts` |
+| `airplus-cloud` | Devices registered in the Philips Air+ app | Cloud MQTT updates via the Air+ account token |
 
-If your device shows `Network error: NetworkError` on every command, try setting `"protocol": "http"` in your accessory config.
+If your device shows `Network error: NetworkError` on every command, try setting `"protocol": "http"` in that device entry.
 
 ---
 
@@ -186,7 +249,7 @@ If your device shows `Network error: NetworkError` on every command, try setting
 ### Quick Setup (Homebridge UI — recommended)
 
 1. Install the plugin via the Homebridge UI
-2. Go to **Plugins → Philips Air Purifier → Settings**
+2. Go to **Plugins → Philips Air Purifier → Plugin Settings**
 3. Click **"Add Air+ Device"**
 4. Click **"Open Philips login →"** — log in with your Philips account
 5. Your browser shows an error page — **copy the full URL from the address bar**
@@ -352,5 +415,5 @@ See [CONTRIBUTORS.md](CONTRIBUTORS.md) for the full contributor list.
 
 ## Support
 
-- **Issues:** [GitHub Issues](https://github.com/MadDogWarner/homebridge-philips-air-purifier-complete/issues)
+- **Issues:** [GitHub Issues](https://github.com/MaddogWarner/homebridge-philips-air-purifier-complete/issues)
 - **Homebridge community:** [homebridge.io](https://homebridge.io)

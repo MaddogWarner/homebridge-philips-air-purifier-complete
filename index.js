@@ -71,8 +71,82 @@ import aiocoap, Cryptodome
 `;
 
 module.exports = (api) => {
-  api.registerAccessory('PhilipsAirPurifier', PhilipsAirPurifierAccessory);
+  api.registerPlatform('PhilipsAirPurifier', PhilipsAirPurifierPlatform);
 };
+
+class PhilipsAirPurifierPlatform {
+  constructor(log, config, api) {
+    this.log = log;
+    this.config = config || {};
+    this.api = api;
+    this._cachedAccessories = new Map();
+    this._activeAccessories = [];
+
+    api.on('didFinishLaunching', () => this._discoverDevices());
+    api.on('shutdown', () => this._shutdownAll());
+  }
+
+  configureAccessory(platformAcc) {
+    this._cachedAccessories.set(platformAcc.UUID, platformAcc);
+  }
+
+  _discoverDevices() {
+    const devices = this.config.devices || [];
+    const activeUUIDs = new Set();
+
+    for (const deviceConfig of devices) {
+      const seed = deviceConfig.airplusDeviceUuid || deviceConfig.host;
+      if (!seed) {
+        this.log.warn(`[PhilipsAir] Device "${deviceConfig.name || 'Unnamed'}" has no host or airplusDeviceUuid - skipping`);
+        continue;
+      }
+
+      const uuid = this.api.hap.uuid.generate(seed);
+      activeUUIDs.add(uuid);
+
+      let platformAcc = this._cachedAccessories.get(uuid);
+      if (platformAcc) {
+        this.log.info(`[PhilipsAir] Restoring cached accessory: ${deviceConfig.name}`);
+      } else {
+        platformAcc = new this.api.platformAccessory(deviceConfig.name, uuid);
+        this.api.registerPlatformAccessories(
+          'homebridge-philips-air-purifier-complete',
+          'PhilipsAirPurifier',
+          [platformAcc]
+        );
+        this.log.info(`[PhilipsAir] Registering new accessory: ${deviceConfig.name}`);
+      }
+
+      platformAcc.context.device = { ...deviceConfig };
+      const acc = new PhilipsAirPurifierAccessory(this.log, deviceConfig, this.api, platformAcc);
+      this._activeAccessories.push(acc);
+      this._cachedAccessories.set(uuid, platformAcc);
+    }
+
+    const staleAccessories = [];
+    for (const [uuid, platformAcc] of this._cachedAccessories) {
+      if (!activeUUIDs.has(uuid)) {
+        staleAccessories.push([uuid, platformAcc]);
+      }
+    }
+
+    for (const [uuid, platformAcc] of staleAccessories) {
+      this.log.info(`[PhilipsAir] Removing stale accessory: ${platformAcc.displayName}`);
+      this.api.unregisterPlatformAccessories(
+        'homebridge-philips-air-purifier-complete',
+        'PhilipsAirPurifier',
+        [platformAcc]
+      );
+      this._cachedAccessories.delete(uuid);
+    }
+  }
+
+  _shutdownAll() {
+    for (const acc of this._activeAccessories) {
+      acc.destroy();
+    }
+  }
+}
 
 /**
  * Daemon communication handler.
@@ -256,9 +330,10 @@ class DaemonHandler {
  * Main accessory class for Philips Air Purifier.
  */
 class PhilipsAirPurifierAccessory {
-  constructor(log, config, api) {
+  constructor(log, config, api, platformAcc) {
     this.log = log;
     this.api = api;
+    this.platformAcc = platformAcc;
     this.Service = api.hap.Service;
     this.Characteristic = api.hap.Characteristic;
 
@@ -490,13 +565,16 @@ class PhilipsAirPurifierAccessory {
     const { Service, Characteristic } = this;
 
     // Accessory Information
-    this.informationService = new Service.AccessoryInformation()
+    this.informationService = this.platformAcc.getService(Service.AccessoryInformation);
+    this.informationService
       .setCharacteristic(Characteristic.Manufacturer, 'Philips')
       .setCharacteristic(Characteristic.Model, 'Air Purifier')
       .setCharacteristic(Characteristic.SerialNumber, this.host);
 
     // Main Air Purifier Service
-    this.purifierService = new Service.AirPurifier(this.name);
+    this.purifierService =
+      this.platformAcc.getService(Service.AirPurifier) ||
+      this.platformAcc.addService(Service.AirPurifier, this.name);
 
     this.purifierService.getCharacteristic(Characteristic.Active)
       .onGet(() => this.state.power ? 1 : 0)
@@ -552,14 +630,18 @@ class PhilipsAirPurifierAccessory {
       });
 
     // Air Quality Sensor
-    this.airQualitySensor = new Service.AirQualitySensor('Air Quality');
+    this.airQualitySensor =
+      this.platformAcc.getService(Service.AirQualitySensor) ||
+      this.platformAcc.addService(Service.AirQualitySensor, 'Air Quality');
     this.airQualitySensor.getCharacteristic(Characteristic.AirQuality)
       .onGet(() => this.pm25ToAirQuality(this.state.pm25));
     this.airQualitySensor.addCharacteristic(Characteristic.PM2_5Density)
       .onGet(() => this.state.pm25 || 0);
 
     // HEPA Filter Maintenance
-    this.hepaFilterService = new Service.FilterMaintenance('HEPA Filter', 'hepa-filter');
+    this.hepaFilterService =
+      this.platformAcc.getServiceById(Service.FilterMaintenance, 'hepa') ||
+      this.platformAcc.addService(new Service.FilterMaintenance('HEPA Filter', 'hepa'));
     this.hepaFilterService.getCharacteristic(Characteristic.FilterLifeLevel)
       .onGet(() => Math.round(this.state.filterLifePercent));
     this.hepaFilterService.getCharacteristic(Characteristic.FilterChangeIndication)
@@ -568,7 +650,9 @@ class PhilipsAirPurifierAccessory {
         : Characteristic.FilterChangeIndication.FILTER_OK);
 
     // Pre-Filter Maintenance
-    this.preFilterService = new Service.FilterMaintenance('Pre-Filter', 'pre-filter');
+    this.preFilterService =
+      this.platformAcc.getServiceById(Service.FilterMaintenance, 'pre') ||
+      this.platformAcc.addService(new Service.FilterMaintenance('Pre-Filter', 'pre'));
     this.preFilterService.getCharacteristic(Characteristic.FilterLifeLevel)
       .onGet(() => Math.round(this.state.cleanupPercent));
     this.preFilterService.getCharacteristic(Characteristic.FilterChangeIndication)
@@ -577,7 +661,9 @@ class PhilipsAirPurifierAccessory {
         : Characteristic.FilterChangeIndication.FILTER_OK);
 
     // Display Light
-    this.lightService = new Service.Lightbulb('Display Light');
+    this.lightService =
+      this.platformAcc.getService(Service.Lightbulb) ||
+      this.platformAcc.addService(Service.Lightbulb, 'Display Light');
     this.lightService.getCharacteristic(Characteristic.On)
       .onGet(() => this.state.lightLevel > 0)
       .onSet(async (value) => {
@@ -611,7 +697,9 @@ class PhilipsAirPurifierAccessory {
 
     // Sleep Mode Switch
     // HomeKit's AirPurifier only has Auto/Manual — Sleep is exposed as a dedicated switch.
-    this.sleepService = new Service.Switch('Sleep Mode', 'sleep-mode');
+    this.sleepService =
+      this.platformAcc.getServiceById(Service.Switch, 'sleep-mode') ||
+      this.platformAcc.addService(Service.Switch, 'Sleep Mode', 'sleep-mode');
     this.sleepService.getCharacteristic(Characteristic.On)
       .onGet(() => this.state.mode === 'sleep' && this.state.power)
       .onSet(async (value) => {
@@ -736,15 +824,7 @@ class PhilipsAirPurifierAccessory {
     this.log.info(`Identify requested for ${this.name}`);
   }
 
-  getServices() {
-    return [
-      this.informationService,
-      this.purifierService,
-      this.airQualitySensor,
-      this.hepaFilterService,
-      this.preFilterService,
-      this.lightService,
-      this.sleepService,
-    ];
+  destroy() {
+    this.daemon.stop();
   }
 }

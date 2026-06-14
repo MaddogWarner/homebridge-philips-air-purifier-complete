@@ -119,6 +119,6 @@ fi
 
 echo ""
 echo "  Setup complete. Plugin is ready to use."
-echo "  Add to Homebridge config.json:"
-echo '    { "accessory": "PhilipsAirPurifier", "name": "Air Purifier", "host": "192.168.1.100" }'
+echo "  Add to Homebridge config.json platforms:"
+echo '    { "platform": "PhilipsAirPurifier", "name": "Philips Air Purifiers", "devices": [{ "name": "Air Purifier", "host": "192.168.1.100" }] }'
 echo ""

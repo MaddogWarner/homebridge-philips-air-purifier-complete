@@ -278,7 +278,8 @@
   async function loadExistingDevices() {
     try {
       const configs = await homebridge.getPluginConfig();
-      const airplus = configs.filter(c => c.protocol === 'airplus-cloud');
+      const platform = configs[0] || {};
+      const airplus = (platform.devices || []).filter(d => d.protocol === 'airplus-cloud');
       const container = document.getElementById('existing-devices');
       if (airplus.length === 0) {
         container.innerHTML = '';

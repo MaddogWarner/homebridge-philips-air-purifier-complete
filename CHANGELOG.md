@@ -6,6 +6,28 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [3.0.0] — 14/06/2026
+
+### Breaking Changes
+
+- Changed the plugin type from `accessory` to `platform`. Config migration is required:
+  move each `accessories[]` entry into the platform `devices[]` array. See the README
+  migration guide.
+- HomeKit accessory identity will be lost after migration. Existing purifiers will appear
+  as new accessories in the Home app and must be re-added to rooms, scenes, and automations.
+
+### Added
+
+- Platform plugin support so the Air+ Setup Wizard is accessible from the Homebridge UI
+  plugin menu via Plugin Settings.
+- Stable UUID generation: Air+ cloud devices are keyed on `airplusDeviceUuid`, while
+  CoAP/HTTP/HomeID devices are keyed on `host`.
+- Automatic stale accessory cleanup when a device is removed from the platform `devices`
+  array and Homebridge restarts.
+- Clean daemon shutdown for all configured devices when Homebridge shuts down.
+
+---
+
 ## [2.4.1] — 14/06/2026
 
 ### Fixed

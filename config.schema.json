@@ -1,121 +1,121 @@
 {
   "pluginAlias": "PhilipsAirPurifier",
-  "pluginType": "accessory",
-  "singular": false,
-  "headerDisplay": "<p align='center'><img src='https://raw.githubusercontent.com/MaddogWarner/homebridge-philips-air-purifier-complete/main/icon.png' width='150' alt='Philips Air Purifier'></p><div style='margin-top:16px;padding:12px 16px;background:#fff3e0;border-left:4px solid #e88122;border-radius:4px;color:#5d3a00;font-size:14px;'><strong>Setting up an Air+ cloud device (AC0650 / AC1715)?</strong><br>Click <strong>Settings</strong> on the plugin card (gear icon at top-right of this panel) to open the Air+ Setup Wizard. The wizard saves your token and fills in the UUID automatically &mdash; you should not need to edit those fields by hand.</div>",
+  "pluginType": "platform",
+  "singular": true,
+  "headerDisplay": "<p align='center'><img src='https://raw.githubusercontent.com/MaddogWarner/homebridge-philips-air-purifier-complete/main/icon.png' width='150' alt='Philips Air Purifier'></p><div style='margin-top:16px;padding:12px 16px;background:#fff3e0;border-left:4px solid #e88122;border-radius:4px;color:#5d3a00;font-size:14px;'><strong>Setting up an Air+ cloud device (AC0650 / AC1715)?</strong><br>Click <strong>Plugin Settings</strong> from the plugin card menu to open the Air+ Setup Wizard. The wizard saves your token and fills in the UUID automatically &mdash; you should not need to edit those fields by hand.</div>",
   "schema": {
     "type": "object",
     "properties": {
       "name": {
-        "title": "Name",
+        "title": "Platform Name",
         "type": "string",
-        "required": true,
-        "default": "Air Purifier",
-        "description": "The name of your air purifier as it will appear in HomeKit"
+        "default": "Philips Air Purifiers"
       },
-      "host": {
-        "title": "IP Address",
-        "type": "string",
-        "required": true,
-        "format": "ipv4",
-        "placeholder": "192.168.1.100",
-        "description": "IP address of your Philips Air Purifier"
-      },
-      "protocol": {
-        "title": "Protocol",
-        "type": "string",
-        "enum": ["coap", "http", "homeid-http", "airplus-cloud"],
-        "default": "coap",
-        "description": "Communication protocol. Use 'http' for AC1xxx DH/AES models, 'homeid-http' for HomeID/Condor local HTTP devices, or 'airplus-cloud' for devices registered in the Philips Air+ app (cloud MQTT)."
-      },
-      "useHttps": {
-        "title": "Use HTTPS for HomeID",
-        "type": "boolean",
-        "default": false,
-        "description": "Use HTTPS for the HomeID local API. Only applies when Protocol is 'homeid-http'."
-      },
-      "clientId": {
-        "title": "HomeID Client ID",
-        "type": "string",
-        "required": false,
-        "x-schema-form": { "type": "password" },
-        "description": "Base64 HomeID local API client ID. Only required for HomeID devices that return a PhilipsCondor authentication challenge."
-      },
-      "clientSecret": {
-        "title": "HomeID Client Secret",
-        "type": "string",
-        "required": false,
-        "x-schema-form": { "type": "password" },
-        "description": "Base64 HomeID local API client secret. Only required for HomeID devices that return a PhilipsCondor authentication challenge."
-      },
-      "encryptionKey": {
-        "title": "HomeID Encryption Key",
-        "type": "string",
-        "required": false,
-        "x-schema-form": { "type": "password" },
-        "description": "Optional hex AES key for HomeID local HTTP payload encryption. If omitted and credentials are provided, the plugin attempts to fetch it from the device security endpoint."
-      },
-      "airplusDeviceUuid": {
-        "title": "Air+ Device UUID",
-        "type": "string",
-        "required": false,
-        "description": "Device UUID — filled in automatically by the Air+ Setup Wizard (Plugin Settings → gear icon). Only enter manually if you ran scripts/airplus_setup.py from the command line."
-      },
-      "airplusTokenFile": {
-        "title": "Air+ Token File Path",
-        "type": "string",
-        "required": false,
-        "description": "Path to the token file. Set automatically by the Air+ Setup Wizard. Leave blank to use the default ~/.homebridge/philips-airplus-{uuid}.json location."
-      },
-      "pythonPath": {
-        "title": "Python Path (Optional)",
-        "type": "string",
-        "required": false,
-        "placeholder": "Auto-detected",
-        "description": "Path to Python 3.12 or newer with aiocoap and pycryptodomex installed. Leave blank to use the plugin's bundled virtual environment (recommended)."
+      "devices": {
+        "title": "Devices",
+        "type": "array",
+        "default": [],
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "title": "Name",
+              "type": "string",
+              "required": true,
+              "default": "Air Purifier",
+              "description": "The name of your air purifier as it will appear in HomeKit"
+            },
+            "host": {
+              "title": "IP Address or Cloud Placeholder",
+              "type": "string",
+              "placeholder": "192.168.1.100",
+              "description": "IP address of your Philips Air Purifier. Use 'cloud' for airplus-cloud devices."
+            },
+            "protocol": {
+              "title": "Protocol",
+              "type": "string",
+              "enum": ["coap", "http", "homeid-http", "airplus-cloud"],
+              "default": "coap",
+              "description": "Communication protocol. Use 'http' for AC1xxx DH/AES models, 'homeid-http' for HomeID/Condor local HTTP devices, or 'airplus-cloud' for devices registered in the Philips Air+ app (cloud MQTT)."
+            },
+            "useHttps": {
+              "title": "Use HTTPS for HomeID",
+              "type": "boolean",
+              "default": false,
+              "description": "Use HTTPS for the HomeID local API. Only applies when Protocol is 'homeid-http'."
+            },
+            "clientId": {
+              "title": "HomeID Client ID",
+              "type": "string",
+              "required": false,
+              "x-schema-form": { "type": "password" },
+              "description": "Base64 HomeID local API client ID. Only required for HomeID devices that return a PhilipsCondor authentication challenge."
+            },
+            "clientSecret": {
+              "title": "HomeID Client Secret",
+              "type": "string",
+              "required": false,
+              "x-schema-form": { "type": "password" },
+              "description": "Base64 HomeID local API client secret. Only required for HomeID devices that return a PhilipsCondor authentication challenge."
+            },
+            "encryptionKey": {
+              "title": "HomeID Encryption Key",
+              "type": "string",
+              "required": false,
+              "x-schema-form": { "type": "password" },
+              "description": "Optional hex AES key for HomeID local HTTP payload encryption. If omitted and credentials are provided, the plugin attempts to fetch it from the device security endpoint."
+            },
+            "airplusDeviceUuid": {
+              "title": "Air+ Device UUID",
+              "type": "string",
+              "required": false,
+              "description": "Device UUID - filled in automatically by the Air+ Setup Wizard. Only enter manually if you ran scripts/airplus_setup.py from the command line."
+            },
+            "airplusTokenFile": {
+              "title": "Air+ Token File Path",
+              "type": "string",
+              "required": false,
+              "description": "Path to the token file. Set automatically by the Air+ Setup Wizard. Leave blank to use the default ~/.homebridge/philips-airplus-{uuid}.json location."
+            },
+            "pythonPath": {
+              "title": "Python Path (Optional)",
+              "type": "string",
+              "required": false,
+              "placeholder": "Auto-detected",
+              "description": "Path to Python 3.12 or newer with aiocoap and pycryptodomex installed. Leave blank to use the plugin's bundled virtual environment (recommended)."
+            }
+          }
+        }
       }
     }
   },
   "layout": [
     {
-      "type": "fieldset",
-      "title": "Device Settings",
-      "expandable": false,
-      "items": ["name", "host", "protocol"]
+      "key": "name"
     },
     {
-      "type": "fieldset",
-      "title": "Advanced Settings",
-      "expandable": true,
-      "expanded": false,
+      "key": "devices",
+      "type": "array",
+      "title": "Devices",
+      "buttonText": "Add Device",
       "items": [
+        "devices[].name",
+        "devices[].host",
+        "devices[].protocol",
         {
-          "key": "useHttps",
-          "description": "Only applies to the homeid-http protocol"
-        },
-        {
-          "key": "clientId",
-          "description": "Only applies to HomeID/Condor devices"
-        },
-        {
-          "key": "clientSecret",
-          "description": "Only applies to HomeID/Condor devices"
-        },
-        {
-          "key": "encryptionKey",
-          "description": "Optional HomeID AES key; leave blank unless needed"
-        },
-        {
-          "key": "airplusDeviceUuid",
-          "description": "Only required for airplus-cloud protocol. Run python scripts/airplus_setup.py to obtain."
-        },
-        {
-          "key": "airplusTokenFile",
-          "description": "Only required for airplus-cloud protocol. Leave blank to use the default ~/.homebridge path."
-        },
-        {
-          "key": "pythonPath",
-          "description": "Only needed if the auto-detected Python does not have the required dependencies"
+          "type": "fieldset",
+          "title": "Advanced Settings",
+          "expandable": true,
+          "expanded": false,
+          "items": [
+            "devices[].useHttps",
+            "devices[].clientId",
+            "devices[].clientSecret",
+            "devices[].encryptionKey",
+            "devices[].airplusDeviceUuid",
+            "devices[].airplusTokenFile",
+            "devices[].pythonPath"
+          ]
         }
       ]
     }

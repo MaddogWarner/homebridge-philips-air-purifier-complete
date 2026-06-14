@@ -271,15 +271,20 @@ def main() -> int:
 
     # Step 9: Print Homebridge config summary
     print("\n" + "=" * 40)
-    print("Add this to your Homebridge config.json accessories array:")
+    print("Add this to your Homebridge config.json platforms array:")
     print()
     print(json.dumps({
-        "accessory": "PhilipsAirPurifier",
-        "name": "Air Purifier (Air+)",
-        "host": "cloud",
-        "protocol": "airplus-cloud",
-        "airplusDeviceUuid": uuid,
-        "airplusTokenFile": token_path,
+        "platform": "PhilipsAirPurifier",
+        "name": "Philips Air Purifiers",
+        "devices": [
+            {
+                "name": "Air Purifier (Air+)",
+                "host": "cloud",
+                "protocol": "airplus-cloud",
+                "airplusDeviceUuid": uuid,
+                "airplusTokenFile": token_path,
+            },
+        ],
     }, indent=2))
     print()
     return 0

@@ -136,15 +136,17 @@ class AirPlusSetupServer extends HomebridgePluginUiServer {
     fs.chmodSync(tokenPath, 0o600);
 
     const configs = await this.getPluginConfig();
-    if (!configs.some((c) => c.airplusDeviceUuid === uuid)) {
-      configs.push({
+    const platformConfig = configs[0] || { name: 'Philips Air Purifiers', devices: [] };
+    if (!platformConfig.devices) platformConfig.devices = [];
+    if (!platformConfig.devices.some((d) => d.airplusDeviceUuid === uuid)) {
+      platformConfig.devices.push({
         name: name || 'Philips Air Purifier',
         host: 'cloud',
         protocol: 'airplus-cloud',
         airplusDeviceUuid: uuid,
         airplusTokenFile: tokenPath,
       });
-      await this.updatePluginConfig(configs);
+      await this.updatePluginConfig([platformConfig]);
       await this.savePluginConfig();
     }
 
