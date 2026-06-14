@@ -181,6 +181,36 @@ If your device shows `Network error: NetworkError` on every command, try setting
 
 ---
 
+## Air+ Cloud Setup (AC0650, AC1715)
+
+### Quick Setup (Homebridge UI — recommended)
+
+1. Install the plugin via the Homebridge UI
+2. Go to **Plugins → Philips Air Purifier → Settings**
+3. Click **"Add Air+ Device"**
+4. Click **"Open Philips login →"** — log in with your Philips account
+5. Your browser shows an error page — **copy the full URL from the address bar**
+6. Paste it into the setup page and click **Continue**
+7. Click **"Save & Connect"** next to your device
+8. Restart Homebridge
+
+Each device needs its own setup run. Run through the wizard once per purifier.
+
+### Advanced / Headless Setup (SSH)
+
+If your Homebridge host has no browser access (Docker, NAS, headless Raspberry Pi):
+
+```bash
+cd /path/to/homebridge-philips-air-purifier-complete
+source .venv/bin/activate
+python scripts/airplus_setup.py
+```
+
+Follow the on-screen instructions. The script saves a token file to
+`~/.homebridge/philips-airplus-{uuid}.json` and prints the Homebridge config to add.
+
+---
+
 ## Connectivity Check (optional)
 
 Before configuring Homebridge, you can verify the plugin can reach your device:

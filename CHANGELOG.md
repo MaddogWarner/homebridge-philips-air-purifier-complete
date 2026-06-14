@@ -21,6 +21,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - New config options `airplusDeviceUuid` and `airplusTokenFile` for `airplus-cloud` accessories.
 - Air+ MQTT power field `D0310D` is now normalised to `D03102` in `parse_status()` so the same
   IPC shape is produced for all protocols.
+- Homebridge UI wizard for Air+ cloud device setup — no SSH or terminal required. Accessible
+  from the plugin's Settings page in the Homebridge web UI.
 
 ---
 

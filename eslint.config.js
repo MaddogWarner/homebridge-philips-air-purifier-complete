@@ -8,6 +8,7 @@ module.exports = [
       'venv/**',
       'node_modules/**',
       '.claude/**',
+      'homebridge-ui/**',
     ],
   },
   js.configs.recommended,

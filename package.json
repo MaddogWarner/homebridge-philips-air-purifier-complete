@@ -1,6 +1,7 @@
 {
   "name": "homebridge-philips-air-purifier-complete",
   "version": "2.4.0",
+  "customUi": true,
   "description": "Homebridge plugin for Philips Air Purifier with bundled CoAP control library and Python 3.12+/Node.js 24 support",
   "main": "index.js",
   "keywords": [
@@ -27,7 +28,9 @@
   "bugs": {
     "url": "https://github.com/MadDogWarner/homebridge-philips-air-purifier-complete/issues"
   },
-  "dependencies": {},
+  "dependencies": {
+    "@homebridge/plugin-ui-utils": "^1.0.0"
+  },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "eslint": "^10.5.0",
