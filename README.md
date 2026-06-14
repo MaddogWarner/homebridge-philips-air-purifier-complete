@@ -112,17 +112,21 @@ v3.0.0 changes the plugin type from `accessory` to `platform`. Update your Homeb
 
 1. Move device entries from `"accessories"` into `"platforms"[0]."devices"`:
 
-   **Before:**
+   **Before: v2.x accessory config**
 
    ```json
    {
      "accessories": [
-       { "accessory": "PhilipsAirPurifier", "name": "Bedroom", "host": "192.168.1.100" }
+       {
+         "name": "Air Purifier",
+         "host": "192.168.1.17",
+         "accessory": "PhilipsAirPurifier"
+       }
      ]
    }
    ```
 
-   **After:**
+   **After: v3.x platform config**
 
    ```json
    {
@@ -131,7 +135,10 @@ v3.0.0 changes the plugin type from `accessory` to `platform`. Update your Homeb
          "platform": "PhilipsAirPurifier",
          "name": "Philips Air Purifiers",
          "devices": [
-           { "name": "Bedroom", "host": "192.168.1.100" }
+           {
+             "name": "Air Purifier",
+             "host": "192.168.1.17"
+           }
          ]
        }
      ]
@@ -141,6 +148,127 @@ v3.0.0 changes the plugin type from `accessory` to `platform`. Update your Homeb
 2. Remove the `"accessory": "PhilipsAirPurifier"` key from each device entry.
 
 3. Restart Homebridge.
+
+### Migration examples
+
+#### CoAP device
+
+**Before:**
+
+```json
+{
+  "accessories": [
+    {
+      "accessory": "PhilipsAirPurifier",
+      "name": "Bedroom",
+      "host": "192.168.1.100"
+    }
+  ]
+}
+```
+
+**After:**
+
+```json
+{
+  "platforms": [
+    {
+      "platform": "PhilipsAirPurifier",
+      "name": "Philips Air Purifiers",
+      "devices": [
+        {
+          "name": "Bedroom",
+          "host": "192.168.1.100"
+        }
+      ]
+    }
+  ]
+}
+```
+
+#### HTTP or HomeID device
+
+**Before:**
+
+```json
+{
+  "accessories": [
+    {
+      "accessory": "PhilipsAirPurifier",
+      "name": "Study",
+      "host": "192.168.1.102",
+      "protocol": "homeid-http",
+      "useHttps": true,
+      "clientId": "BASE64_CLIENT_ID",
+      "clientSecret": "BASE64_CLIENT_SECRET"
+    }
+  ]
+}
+```
+
+**After:**
+
+```json
+{
+  "platforms": [
+    {
+      "platform": "PhilipsAirPurifier",
+      "name": "Philips Air Purifiers",
+      "devices": [
+        {
+          "name": "Study",
+          "host": "192.168.1.102",
+          "protocol": "homeid-http",
+          "useHttps": true,
+          "clientId": "BASE64_CLIENT_ID",
+          "clientSecret": "BASE64_CLIENT_SECRET"
+        }
+      ]
+    }
+  ]
+}
+```
+
+#### Air+ cloud device
+
+**Before:**
+
+```json
+{
+  "accessories": [
+    {
+      "accessory": "PhilipsAirPurifier",
+      "name": "Air Purifier (Air+)",
+      "host": "cloud",
+      "protocol": "airplus-cloud",
+      "airplusDeviceUuid": "AIRPLUS_DEVICE_UUID",
+      "airplusTokenFile": "/home/homebridge/.homebridge/philips-airplus-AIRPLUS_DEVICE_UUID.json"
+    }
+  ]
+}
+```
+
+**After:**
+
+```json
+{
+  "platforms": [
+    {
+      "platform": "PhilipsAirPurifier",
+      "name": "Philips Air Purifiers",
+      "devices": [
+        {
+          "name": "Air Purifier (Air+)",
+          "host": "cloud",
+          "protocol": "airplus-cloud",
+          "airplusDeviceUuid": "AIRPLUS_DEVICE_UUID",
+          "airplusTokenFile": "/home/homebridge/.homebridge/philips-airplus-AIRPLUS_DEVICE_UUID.json"
+        }
+      ]
+    }
+  ]
+}
+```
 
 **Note:** HomeKit will treat migrated devices as new accessories. Re-add them to rooms,
 scenes, and automations in the Home app.

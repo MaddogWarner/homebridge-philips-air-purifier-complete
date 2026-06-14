@@ -6,6 +6,15 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [3.0.2] — 14/06/2026
+
+### Fixed
+
+- Expanded the README migration guide with before/after JSON examples for CoAP, HTTP/HomeID,
+  and Air+ cloud configurations.
+
+---
+
 ## [3.0.1] — 14/06/2026
 
 ### Fixed
