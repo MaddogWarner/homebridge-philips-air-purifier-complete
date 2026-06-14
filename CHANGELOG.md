@@ -6,6 +6,24 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [2.4.0] — 14/06/2026
+
+### Added
+
+- **Philips Air+ cloud MQTT protocol** (`airplus-cloud`) for devices registered in the
+  Philips Air+ app (e.g. AC0650/10, AC1715). Uses OAuth2/PKCE → AWS IoT MQTT over WebSocket.
+  State updates push within ~2 seconds via MQTT subscription.
+- `scripts/airplus_setup.py` — interactive CLI to complete the OAuth2/PKCE flow, list registered
+  devices, and save tokens to `~/.homebridge/philips-airplus-{uuid}.json`.
+- `scripts/probe_devices.py` — standalone stdlib-only script that tests all three local protocols
+  (CoAP port 5683, HTTP DH/AES, HomeID) against a list of device IPs and prints a pass/fail report.
+- New `paho-mqtt>=2.1` Python runtime dependency (installed automatically by `postinstall.sh`).
+- New config options `airplusDeviceUuid` and `airplusTokenFile` for `airplus-cloud` accessories.
+- Air+ MQTT power field `D0310D` is now normalised to `D03102` in `parse_status()` so the same
+  IPC shape is produced for all protocols.
+
+---
+
 ## [2.3.0] — 2026-05-24
 
 ### Added

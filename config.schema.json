@@ -24,9 +24,9 @@
       "protocol": {
         "title": "Protocol",
         "type": "string",
-        "enum": ["coap", "http", "homeid-http"],
+        "enum": ["coap", "http", "homeid-http", "airplus-cloud"],
         "default": "coap",
-        "description": "Communication protocol. Use 'http' for AC1xxx DH/AES models (AC1715, etc.) or 'homeid-http' for HomeID/Condor local HTTP devices."
+        "description": "Communication protocol. Use 'http' for AC1xxx DH/AES models, 'homeid-http' for HomeID/Condor local HTTP devices, or 'airplus-cloud' for devices registered in the Philips Air+ app (cloud MQTT)."
       },
       "useHttps": {
         "title": "Use HTTPS for HomeID",
@@ -54,6 +54,18 @@
         "required": false,
         "x-schema-form": { "type": "password" },
         "description": "Optional hex AES key for HomeID local HTTP payload encryption. If omitted and credentials are provided, the plugin attempts to fetch it from the device security endpoint."
+      },
+      "airplusDeviceUuid": {
+        "title": "Air+ Device UUID",
+        "type": "string",
+        "required": false,
+        "description": "UUID from running 'python scripts/airplus_setup.py'. Required for airplus-cloud protocol."
+      },
+      "airplusTokenFile": {
+        "title": "Air+ Token File Path",
+        "type": "string",
+        "required": false,
+        "description": "Path to tokens JSON from airplus_setup.py. Defaults to ~/.homebridge/philips-airplus-{uuid}.json if omitted."
       },
       "pythonPath": {
         "title": "Python Path (Optional)",
@@ -92,6 +104,14 @@
         {
           "key": "encryptionKey",
           "description": "Optional HomeID AES key; leave blank unless needed"
+        },
+        {
+          "key": "airplusDeviceUuid",
+          "description": "Only required for airplus-cloud protocol. Run python scripts/airplus_setup.py to obtain."
+        },
+        {
+          "key": "airplusTokenFile",
+          "description": "Only required for airplus-cloud protocol. Leave blank to use the default ~/.homebridge path."
         },
         {
           "key": "pythonPath",

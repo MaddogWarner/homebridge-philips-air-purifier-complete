@@ -18,6 +18,7 @@ const { spawn, execFileSync } = require('node:child_process');
 const readline = require('node:readline');
 const path = require('node:path');
 const fs = require('node:fs');
+const os = require('node:os');
 
 // Constants for device values
 const MODE = {
@@ -102,6 +103,10 @@ class DaemonHandler {
       }
       if (protocol === 'homeid-http' && options.useHttps) {
         args.push('--use-https');
+      }
+      if (protocol === 'airplus-cloud') {
+        args.push('--device-uuid', options.airplusDeviceUuid);
+        args.push('--token-file', options.airplusTokenFile);
       }
 
       this.log.info(`Starting ${protocol} daemon: ${pythonPath} ${args.join(' ')}`);
@@ -264,11 +269,25 @@ class PhilipsAirPurifierAccessory {
     this.homeIdClientSecret = config.clientSecret || '';
     this.homeIdEncryptionKey = config.encryptionKey || '';
     this.useHttps = Boolean(config.useHttps);
+    this.airplusDeviceUuid = config.airplusDeviceUuid || '';
+    this.airplusTokenFile = config.airplusTokenFile || '';
 
-    if (!this.host) {
-      throw new Error('host is required in config');
+    if (this.protocol === 'airplus-cloud') {
+      // host is unused for cloud protocol; use 'cloud' as a placeholder
+      this.host = this.host || 'cloud';
+      if (!this.airplusDeviceUuid) {
+        this.log.warn('airplusDeviceUuid is required for airplus-cloud protocol. Run: python scripts/airplus_setup.py');
+      }
+      if (!this.airplusTokenFile) {
+        this.airplusTokenFile = path.join(os.homedir(), `.homebridge/philips-airplus-${this.airplusDeviceUuid}.json`);
+        this.log.debug(`airplusTokenFile not set, defaulting to: ${this.airplusTokenFile}`);
+      }
+    } else {
+      if (!this.host) {
+        throw new Error('host is required in config');
+      }
+      this.validateHost(this.host);
     }
-    this.validateHost(this.host);
     this.validateProtocol(this.protocol);
 
     const pluginDir = __dirname;
@@ -373,8 +392,8 @@ class PhilipsAirPurifierAccessory {
   }
 
   validateProtocol(protocol) {
-    if (!['coap', 'http', 'homeid-http'].includes(protocol)) {
-      throw new Error(`protocol must be "coap", "http", or "homeid-http", got: "${protocol}"`);
+    if (!['coap', 'http', 'homeid-http', 'airplus-cloud'].includes(protocol)) {
+      throw new Error(`protocol must be "coap", "http", "homeid-http", or "airplus-cloud", got: "${protocol}"`);
     }
   }
 
@@ -400,10 +419,13 @@ class PhilipsAirPurifierAccessory {
         homeIdClientId: this.homeIdClientId,
         homeIdClientSecret: this.homeIdClientSecret,
         homeIdEncryptionKey: this.homeIdEncryptionKey,
+        airplusDeviceUuid: this.airplusDeviceUuid,
+        airplusTokenFile: this.airplusTokenFile,
       });
       this.deviceReachable = connected;
       this._restartAttempt = 0;
-      this.log.info(`Daemon started, waiting for ${this.protocol === 'coap' ? 'CoAP observe' : 'HTTP poll'} updates...`);
+      const updateType = this.protocol === 'coap' ? 'CoAP observe' : this.protocol === 'airplus-cloud' ? 'MQTT' : 'HTTP poll';
+      this.log.info(`Daemon started, waiting for ${updateType} updates...`);
     } catch (error) {
       this.log.error(`Failed to start daemon: ${error.message}`);
       this.deviceReachable = false;

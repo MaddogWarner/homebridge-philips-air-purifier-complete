@@ -100,9 +100,9 @@ fi
 
 # Install Python dependencies
 # aioairctrl is bundled in this package - only CoAP and crypto libs needed
-echo "  Installing Python dependencies (aiocoap, pycryptodomex)..."
+echo "  Installing Python dependencies (aiocoap, pycryptodomex, paho-mqtt)..."
 "$VENV_DIR/bin/python3" -m pip install --upgrade pip --quiet
-"$VENV_DIR/bin/python3" -m pip install "aiocoap>=0.4.17,<0.5" "pycryptodomex>=3.23,<4" --quiet
+"$VENV_DIR/bin/python3" -m pip install "aiocoap>=0.4.17,<0.5" "pycryptodomex>=3.23,<4" "paho-mqtt>=2.1" --quiet
 
 if [ $? -ne 0 ]; then
     warn "Failed to install Python dependencies."
@@ -111,7 +111,7 @@ if [ $? -ne 0 ]; then
 fi
 
 # Verify the setup works
-if "$VENV_DIR/bin/python3" -c "import sys; assert sys.version_info >= (${PYTHON_MIN_MAJOR}, ${PYTHON_MIN_MINOR}); import aiocoap, Cryptodome" 2>/dev/null; then
+if "$VENV_DIR/bin/python3" -c "import sys; assert sys.version_info >= (${PYTHON_MIN_MAJOR}, ${PYTHON_MIN_MINOR}); import aiocoap, Cryptodome, paho.mqtt" 2>/dev/null; then
     echo "  Python dependencies installed successfully."
 else
     warn "Dependencies installed but import check failed - check your Python environment."
