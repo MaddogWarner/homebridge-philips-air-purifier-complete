@@ -6,6 +6,31 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [3.1.0] — 14/06/2026
+
+### Added
+
+- Replaced the Air+-only custom UI with a full **Plugin Settings** device manager for CoAP,
+  HTTP, HomeID, and Air+ devices.
+- Added add/edit/delete support for platform `devices[]` without using the broken Homebridge
+  auto-generated nested array form.
+- Added HomeID-aware settings in the custom UI, including HTTPS, client ID, client secret, and
+  encryption key handling. Saved HomeID secrets are preserved without being returned to the
+  browser unless replaced or explicitly cleared.
+- Kept the Air+ OAuth setup flow inside the new device manager and now updates existing Air+
+  devices when the same Air+ UUID is selected again.
+
+### Changed
+
+- Updated the config schema banner and README to direct users to **Plugin Settings** for device
+  setup. The **JSON Config** tab remains supported for manual edits and bulk migration.
+- Clarified the custom device editor submit button text and blocked Air+ setup while local device
+  edits are staged but not saved.
+- Documented that deleting an Air+ device from Plugin Settings removes the config entry but leaves
+  the Air+ token file on disk for manual cleanup.
+
+---
+
 ## [3.0.3] — 14/06/2026
 
 ### Fixed

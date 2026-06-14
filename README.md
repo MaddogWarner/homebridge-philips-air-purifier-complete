@@ -339,7 +339,7 @@ For HomeID/Condor local HTTP devices:
 }
 ```
 
-For CoAP, HTTP, and HomeID devices, configure the `devices` array in the Homebridge **JSON Config** tab. The visual Plugin Config form only exposes the platform name because the Homebridge UI currently renders this plugin's nested device array incorrectly. For Air+ cloud devices, use **Plugin Settings** to run the setup wizard.
+Use **Plugin Settings** to add, edit, or remove CoAP, HTTP, HomeID, and Air+ cloud devices. The visual **Plugin Config** form only exposes the platform name because the Homebridge UI currently renders this plugin's nested device array incorrectly. The **JSON Config** tab remains supported for manual edits and bulk migration.
 
 ### Configuration Options
 
@@ -379,13 +379,18 @@ If your device shows `Network error: NetworkError` on every command, try setting
 1. Install the plugin via the Homebridge UI
 2. Go to **Plugins → Philips Air Purifier → Plugin Settings**
 3. Click **"Add Air+ Device"**
-4. Click **"Open Philips login →"** — log in with your Philips account
-5. Your browser shows an error page — **copy the full URL from the address bar**
+4. Click **"Open Philips login"** and log in with your Philips account
+5. Your browser shows an error page - **copy the full URL from the address bar**
 6. Paste it into the setup page and click **Continue**
-7. Click **"Save & Connect"** next to your device
+7. Click **"Save Air+ Device"** next to your device
 8. Restart Homebridge
 
 Each device needs its own setup run. Run through the wizard once per purifier.
+
+Deleting an Air+ device in **Plugin Settings** removes it from the Homebridge config only. The
+token file is intentionally left on disk at `~/.homebridge/philips-airplus-{uuid}.json` so an
+accidental delete does not revoke local setup state. Remove that file manually if you are cleaning
+up an Air+ device permanently.
 
 ### Advanced / Headless Setup (SSH)
 

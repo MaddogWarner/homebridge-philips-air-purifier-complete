@@ -3,374 +3,848 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Philips Air+ Setup</title>
+  <title>Philips Air Purifier Settings</title>
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
+    * { box-sizing: border-box; }
+
+    :root {
+      --bg: #161616;
+      --panel: #242424;
+      --panel-soft: #2d2d2d;
+      --border: #3a3a3a;
+      --text: #eeeeee;
+      --muted: #aaaaaa;
+      --accent: #e88122;
+      --accent-dark: #c96d1f;
+      --danger: #d64545;
+      --success: #45a65a;
+      --input: #111111;
+    }
 
     body {
-      background: #1a1a1a;
-      color: #e0e0e0;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       font-size: 15px;
       line-height: 1.5;
+      margin: 0;
       padding: 24px;
     }
 
+    h1, h2, h3, p { margin-top: 0; }
+
     h1 {
-      font-size: 22px;
-      font-weight: 600;
-      margin-bottom: 20px;
-      color: #ffffff;
+      font-size: 24px;
+      font-weight: 650;
+      margin-bottom: 18px;
     }
 
     h2 {
-      font-size: 16px;
-      font-weight: 600;
-      margin-bottom: 12px;
-      color: #ffffff;
-    }
-
-    .card {
-      background: #2a2a2a;
-      border-radius: 8px;
-      padding: 16px 20px;
+      font-size: 18px;
+      font-weight: 650;
       margin-bottom: 12px;
     }
 
-    .card-label {
-      font-weight: 500;
+    h3 {
+      font-size: 15px;
+      font-weight: 650;
       margin-bottom: 4px;
     }
 
-    .card-sub {
-      font-size: 13px;
-      color: #9e9e9e;
+    [hidden] { display: none !important; }
+
+    .layout {
+      display: grid;
+      gap: 14px;
+      max-width: 1040px;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+    }
+
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 4px;
+    }
+
+    .toolbar-spacer { flex: 1; }
+
+    .platform-row {
+      display: grid;
+      gap: 8px;
+      grid-template-columns: minmax(160px, 240px) minmax(220px, 1fr);
+      align-items: center;
+    }
+
+    .device-grid {
+      display: grid;
+      gap: 10px;
     }
 
     .device-card {
-      background: #2a2a2a;
-      border-radius: 8px;
-      padding: 16px 20px;
-      margin-bottom: 12px;
-      display: flex;
       align-items: center;
-      justify-content: space-between;
+      background: var(--panel-soft);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      display: grid;
       gap: 12px;
+      grid-template-columns: minmax(0, 1fr) auto;
+      padding: 14px;
+    }
+
+    .device-actions {
+      display: flex;
       flex-wrap: wrap;
+      gap: 8px;
+      justify-content: flex-end;
     }
 
-    .device-info {
-      flex: 1;
-      min-width: 0;
+    .meta {
+      color: var(--muted);
+      font-size: 13px;
+      overflow-wrap: anywhere;
     }
 
-    .device-name-input {
-      background: #1a1a1a;
-      border: 1px solid #444;
-      border-radius: 4px;
-      color: #e0e0e0;
-      font-size: 14px;
-      padding: 6px 10px;
-      width: 200px;
+    .badge {
+      background: #363636;
+      border: 1px solid #4a4a4a;
+      border-radius: 999px;
+      color: var(--text);
+      display: inline-flex;
+      font-size: 12px;
+      font-weight: 650;
+      margin-right: 8px;
+      padding: 2px 8px;
+      vertical-align: 1px;
     }
 
-    .device-name-input:focus {
-      border-color: #e88122;
+    .badge.cloud { border-color: #4b78c2; }
+    .badge.homeid { border-color: #7f66c6; }
+    .badge.local { border-color: #4d9961; }
+
+    .form-grid {
+      display: grid;
+      gap: 14px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .field.full { grid-column: 1 / -1; }
+
+    label {
+      color: var(--text);
+      display: block;
+      font-weight: 600;
+      margin-bottom: 5px;
+    }
+
+    input, select {
+      background: var(--input);
+      border: 1px solid #4a4a4a;
+      border-radius: 6px;
+      color: var(--text);
+      font: inherit;
+      min-height: 40px;
+      padding: 8px 10px;
+      width: 100%;
+    }
+
+    input:focus, select:focus, textarea:focus {
+      border-color: var(--accent);
       outline: none;
     }
 
+    input[type="checkbox"] {
+      height: 20px;
+      min-height: 20px;
+      width: 20px;
+    }
+
+    .check-row {
+      align-items: center;
+      display: flex;
+      gap: 10px;
+      min-height: 40px;
+    }
+
+    .check-row label {
+      margin: 0;
+    }
+
+    .help {
+      color: var(--muted);
+      font-size: 13px;
+      margin-top: 5px;
+    }
+
+    .secret-state {
+      color: var(--muted);
+      font-size: 13px;
+      margin-top: 5px;
+    }
+
+    details {
+      border-top: 1px solid var(--border);
+      grid-column: 1 / -1;
+      margin-top: 4px;
+      padding-top: 12px;
+    }
+
+    summary {
+      color: var(--text);
+      cursor: pointer;
+      font-weight: 650;
+      margin-bottom: 12px;
+    }
+
     button {
-      background: #e88122;
-      border: none;
+      background: var(--accent);
+      border: 0;
       border-radius: 6px;
       color: #ffffff;
       cursor: pointer;
       font-size: 14px;
-      font-weight: 600;
-      padding: 9px 18px;
-      transition: background 0.15s;
+      font-weight: 650;
+      min-height: 38px;
+      padding: 9px 16px;
     }
 
-    button:hover {
-      background: #cf7320;
-    }
+    button:hover { background: var(--accent-dark); }
 
     button.secondary {
       background: #3a3a3a;
-      color: #e0e0e0;
+      color: var(--text);
     }
 
-    button.secondary:hover {
-      background: #4a4a4a;
+    button.secondary:hover { background: #4a4a4a; }
+
+    button.danger {
+      background: #7f2d2d;
     }
 
-    .btn-row {
-      display: flex;
-      gap: 10px;
-      margin-top: 16px;
-      flex-wrap: wrap;
+    button.danger:hover { background: #963636; }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
     }
 
     textarea {
-      background: #1a1a1a;
-      border: 1px solid #444;
+      background: var(--input);
+      border: 1px solid #4a4a4a;
       border-radius: 6px;
-      color: #e0e0e0;
-      font-family: monospace;
+      color: var(--text);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       font-size: 13px;
+      min-height: 108px;
       padding: 10px;
       resize: vertical;
       width: 100%;
-      margin-top: 10px;
     }
 
-    textarea:focus {
-      border-color: #e88122;
-      outline: none;
+    .status {
+      border-radius: 6px;
+      display: none;
+      padding: 12px 14px;
     }
 
-    .instructions {
-      color: #9e9e9e;
-      font-size: 13px;
-      margin-top: 8px;
+    .status.error {
+      background: #2b1515;
+      border: 1px solid var(--danger);
+      color: #ffb7b7;
+      display: block;
     }
 
-    .note {
-      color: #9e9e9e;
-      font-size: 13px;
-      margin-top: 20px;
-      padding-top: 16px;
-      border-top: 1px solid #333;
+    .status.success {
+      background: #162718;
+      border: 1px solid var(--success);
+      color: #bdedc7;
+      display: block;
     }
+
+    .status.info {
+      background: #1a2433;
+      border: 1px solid #426da9;
+      color: #c6ddff;
+      display: block;
+    }
+
+    .empty {
+      background: var(--panel-soft);
+      border: 1px dashed #555555;
+      border-radius: 8px;
+      color: var(--muted);
+      padding: 18px;
+    }
+
+    .airplus-step { display: none; }
+    .airplus-step.active { display: block; }
 
     a {
-      color: #e88122;
+      color: var(--accent);
       text-decoration: none;
     }
 
-    a:hover {
-      text-decoration: underline;
-    }
+    a:hover { text-decoration: underline; }
 
-    #error-box {
-      display: none;
-      background: #2a1a1a;
-      border: 1px solid #e53935;
-      border-radius: 6px;
-      color: #e53935;
-      margin-bottom: 16px;
-      padding: 12px 16px;
-    }
+    @media (max-width: 720px) {
+      body { padding: 16px; }
 
-    .success-title {
-      color: #43a047;
-      font-size: 20px;
-      font-weight: 600;
-      margin-bottom: 8px;
-    }
+      .platform-row,
+      .form-grid,
+      .device-card {
+        grid-template-columns: 1fr;
+      }
 
-    .token-path {
-      color: #9e9e9e;
-      font-family: monospace;
-      font-size: 12px;
-      margin-top: 8px;
-      word-break: break-all;
+      .device-actions {
+        justify-content: flex-start;
+      }
     }
-
-    .spinner {
-      color: #9e9e9e;
-      font-size: 14px;
-      padding: 20px 0;
-    }
-
-    .existing-device {
-      color: #43a047;
-      font-size: 13px;
-    }
-
-    .step { display: none; }
-    .step.active { display: block; }
   </style>
 </head>
 <body>
+  <div class="layout">
+    <header>
+      <h1>Philips Air Purifier Settings</h1>
+      <div class="toolbar">
+        <button type="button" onclick="openLocalEditor()">Add Local Device</button>
+        <button type="button" onclick="startAirplusSetup()">Add Air+ Device</button>
+        <button class="secondary" type="button" onclick="loadConfig()">Refresh</button>
+        <span class="toolbar-spacer"></span>
+        <button id="save-config" type="button" onclick="saveConfig()" disabled>Save Configuration</button>
+      </div>
+    </header>
 
-<h1>Philips Air+ Setup</h1>
+    <div id="status" class="status"></div>
 
-<div id="error-box">
-  <span id="error-msg"></span>
-  <div class="btn-row">
-    <button onclick="goToStep(1)">Try again</button>
+    <section class="panel">
+      <div class="platform-row">
+        <label for="platform-name">Platform Name</label>
+        <input id="platform-name" type="text" autocomplete="off" value="Philips Air Purifiers">
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Devices</h2>
+      <div id="device-list" class="device-grid">
+        <div class="empty">Loading devices...</div>
+      </div>
+    </section>
+
+    <section id="device-editor" class="panel" hidden>
+      <h2 id="editor-title">Add Device</h2>
+      <form id="device-form" onsubmit="saveDeviceForm(event)">
+        <div class="form-grid">
+          <div class="field">
+            <label for="device-name">Name</label>
+            <input id="device-name" type="text" autocomplete="off" required>
+          </div>
+
+          <div class="field">
+            <label for="device-protocol">Protocol</label>
+            <select id="device-protocol" onchange="renderProtocolFields()">
+              <option value="coap">CoAP local</option>
+              <option value="http">HTTP DH/AES local</option>
+              <option value="homeid-http">HomeID local HTTP</option>
+              <option value="airplus-cloud">Air+ cloud</option>
+            </select>
+          </div>
+
+          <div id="host-field" class="field full">
+            <label for="device-host">IP Address</label>
+            <input id="device-host" type="text" inputmode="decimal" autocomplete="off" placeholder="192.168.1.100">
+            <div class="help">IPv4 address used by CoAP, HTTP, and HomeID local devices.</div>
+          </div>
+
+          <div id="homeid-fields" class="field full" hidden>
+            <div class="form-grid">
+              <div class="field full">
+                <div class="check-row">
+                  <input id="device-use-https" type="checkbox">
+                  <label for="device-use-https">Use HTTPS for HomeID</label>
+                </div>
+              </div>
+
+              <div class="field">
+                <label for="device-client-id">HomeID Client ID</label>
+                <input id="device-client-id" type="text" autocomplete="off">
+              </div>
+
+              <div class="field">
+                <label for="device-client-secret">HomeID Client Secret</label>
+                <input id="device-client-secret" type="password" autocomplete="new-password">
+                <div id="client-secret-state" class="secret-state"></div>
+                <div id="clear-client-secret-row" class="check-row" hidden>
+                  <input id="clear-client-secret" type="checkbox">
+                  <label for="clear-client-secret">Clear saved client secret</label>
+                </div>
+              </div>
+
+              <div class="field full">
+                <label for="device-encryption-key">HomeID Encryption Key</label>
+                <input id="device-encryption-key" type="password" autocomplete="new-password">
+                <div id="encryption-key-state" class="secret-state"></div>
+                <div id="clear-encryption-key-row" class="check-row" hidden>
+                  <input id="clear-encryption-key" type="checkbox">
+                  <label for="clear-encryption-key">Clear saved encryption key</label>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div id="airplus-fields" class="field full" hidden>
+            <div class="form-grid">
+              <div class="field">
+                <label for="airplus-uuid">Air+ Device UUID</label>
+                <input id="airplus-uuid" type="text" autocomplete="off">
+              </div>
+              <div class="field">
+                <label for="airplus-token-file">Air+ Token File</label>
+                <input id="airplus-token-file" type="text" autocomplete="off" placeholder="Auto-generated by the Air+ setup flow">
+              </div>
+              <div class="field full">
+                <div class="help">Use Add Air+ Device to log in and create the token file automatically.</div>
+              </div>
+            </div>
+          </div>
+
+          <details>
+            <summary>Advanced runtime paths</summary>
+            <div class="form-grid">
+              <div class="field">
+                <label for="device-python-path">Python Path</label>
+                <input id="device-python-path" type="text" autocomplete="off">
+              </div>
+              <div class="field">
+                <label for="device-api-script-path">API Script Path</label>
+                <input id="device-api-script-path" type="text" autocomplete="off">
+              </div>
+            </div>
+          </details>
+
+          <div class="field full toolbar">
+            <button id="device-submit" type="submit">Add Device</button>
+            <button class="secondary" type="button" onclick="closeEditor()">Cancel</button>
+          </div>
+        </div>
+      </form>
+    </section>
+
+    <section id="airplus-flow" class="panel" hidden>
+      <div id="airplus-step-1" class="airplus-step">
+        <h2>Air+ Account Login</h2>
+        <p><a id="auth-link" href="#" target="_blank" rel="noopener">Open Philips login</a></p>
+        <p class="help">After login, paste the full browser address shown after the Philips redirect.</p>
+        <textarea id="redirect-url" placeholder="com.philips.air://loginredirect?code=..."></textarea>
+        <div class="toolbar">
+          <button type="button" onclick="exchangeAirplusCode()">Continue</button>
+          <button class="secondary" type="button" onclick="closeAirplusFlow()">Cancel</button>
+        </div>
+      </div>
+
+      <div id="airplus-step-2" class="airplus-step">
+        <h2>Select Air+ Device</h2>
+        <div id="airplus-device-list" class="device-grid">
+          <div class="empty">Connecting...</div>
+        </div>
+      </div>
+    </section>
   </div>
-</div>
 
-<!-- Step 0: Landing -->
-<div id="step-0" class="step active">
-  <div id="existing-devices"></div>
-  <button onclick="startSetup()">Add Air+ Device</button>
-  <p class="note">For CoAP / HTTP / HomeID devices, use the JSON tab to edit config directly.</p>
-</div>
+  <script>
+    const PROTOCOL_META = {
+      coap: { label: 'CoAP local', badge: 'local' },
+      http: { label: 'HTTP DH/AES local', badge: 'local' },
+      'homeid-http': { label: 'HomeID local HTTP', badge: 'homeid' },
+      'airplus-cloud': { label: 'Air+ cloud', badge: 'cloud' },
+    };
 
-<!-- Step 1: Log in -->
-<div id="step-1" class="step">
-  <div class="card">
-    <h2>Log in with your Philips account</h2>
-    <p>
-      <a id="auth-link" href="#" target="_blank">Open Philips login &rarr;</a>
-    </p>
-    <p class="instructions">
-      After logging in, your browser will show an error page &mdash; that's expected.
-      Copy the entire URL from your browser's address bar and paste it below.
-    </p>
-    <textarea id="redirect-url" rows="4" placeholder="com.philips.air://loginredirect?code=..."></textarea>
-  </div>
-  <div class="btn-row">
-    <button onclick="doExchange()">Continue &rarr;</button>
-    <button class="secondary" onclick="goToStep(0)">Cancel</button>
-  </div>
-</div>
+    let state = { name: 'Philips Air Purifiers', devices: [] };
+    let dirty = false;
+    let editingIndex = null;
+    let editingDevice = null;
+    let pastedAirplusUrl = '';
 
-<!-- Step 2: Device selection -->
-<div id="step-2" class="step">
-  <div id="device-list"><div class="spinner">Connecting...</div></div>
-</div>
-
-<!-- Step 3: Success -->
-<div id="step-3" class="step">
-  <div class="card">
-    <div class="success-title" id="success-title"></div>
-    <div class="token-path" id="token-path"></div>
-  </div>
-  <div class="btn-row">
-    <button onclick="startSetup()">Add Another Device</button>
-    <button class="secondary" onclick="location.reload()">Done</button>
-  </div>
-</div>
-
-<script>
-  let _authUrl = '';
-  let _pastedUrl = '';
-
-  function goToStep(n) {
-    document.querySelectorAll('.step').forEach(el => el.classList.remove('active'));
-    document.getElementById('step-' + n).classList.add('active');
-    hideError();
-  }
-
-  function showError(msg) {
-    const box = document.getElementById('error-box');
-    document.getElementById('error-msg').textContent = msg;
-    box.style.display = 'block';
-  }
-
-  function hideError() {
-    document.getElementById('error-box').style.display = 'none';
-  }
-
-  async function req(path, body) {
-    try {
-      return await homebridge.request(path, body || {});
-    } catch (e) {
-      showError(e.message || String(e));
-      throw e;
+    async function req(path, body) {
+      try {
+        return await homebridge.request(path, body || {});
+      } catch (error) {
+        showStatus(error.message || String(error), 'error');
+        throw error;
+      }
     }
-  }
 
-  async function loadExistingDevices() {
-    try {
-      const configs = await homebridge.getPluginConfig();
-      const platform = configs[0] || {};
-      const airplus = (platform.devices || []).filter(d => d.protocol === 'airplus-cloud');
-      const container = document.getElementById('existing-devices');
-      if (airplus.length === 0) {
-        container.innerHTML = '';
+    async function loadConfig() {
+      showStatus('Loading configuration...', 'info');
+      const result = await req('/config/get');
+      state = result.config || { name: 'Philips Air Purifiers', devices: [] };
+      document.getElementById('platform-name').value = state.name || 'Philips Air Purifiers';
+      dirty = false;
+      closeEditor();
+      closeAirplusFlow(false);
+      renderDevices();
+      updateSaveButton();
+      hideStatus();
+    }
+
+    async function saveConfig() {
+      const payload = {
+        name: document.getElementById('platform-name').value.trim() || 'Philips Air Purifiers',
+        devices: state.devices,
+      };
+      showStatus('Saving configuration...', 'info');
+      const result = await req('/config/save', payload);
+      state = result.config || payload;
+      document.getElementById('platform-name').value = state.name || 'Philips Air Purifiers';
+      dirty = false;
+      renderDevices();
+      updateSaveButton();
+      showStatus('Configuration saved. Restart Homebridge for device changes to take effect.', 'success');
+    }
+
+    function renderDevices() {
+      const container = document.getElementById('device-list');
+      const devices = state.devices || [];
+      if (devices.length === 0) {
+        container.innerHTML = '<div class="empty">No devices configured.</div>';
         return;
       }
-      container.innerHTML = airplus.map(c => {
-        const short = c.airplusDeviceUuid ? c.airplusDeviceUuid.slice(0, 8) + '...' : 'unknown';
-        return '<div class="card"><span class="existing-device">&#10003; ' +
-          escHtml(c.name || 'Philips Air Purifier') + ' (' + escHtml(short) + ')</span></div>';
-      }).join('');
-    } catch (_e) {
-      // not critical — ignore
-    }
-  }
 
-  async function startSetup() {
-    hideError();
-    try {
-      const result = await req('/auth/init');
-      _authUrl = result.url;
-      document.getElementById('auth-link').href = _authUrl;
-      window.open(_authUrl, '_blank');
-      goToStep(1);
-    } catch (_e) {
-      // error already shown
-    }
-  }
+      container.innerHTML = devices.map((device, index) => {
+        const meta = PROTOCOL_META[device.protocol || 'coap'] || PROTOCOL_META.coap;
+        const endpoint = device.protocol === 'airplus-cloud'
+          ? 'UUID: ' + shortValue(device.airplusDeviceUuid || 'not set')
+          : 'Host: ' + (device.host || 'not set');
+        const extra = device.protocol === 'homeid-http'
+          ? (device.useHttps ? 'HTTPS enabled' : 'HTTP') + secretSummary(device)
+          : device.protocol === 'airplus-cloud'
+            ? tokenSummary(device)
+            : '';
 
-  async function doExchange() {
-    const ta = document.getElementById('redirect-url');
-    const url = ta.value.trim();
-    if (!url) {
-      showError('Please paste the redirect URL from your browser.');
-      return;
-    }
-    _pastedUrl = url;
-    goToStep(2);
-    await loadDevices();
-  }
-
-  async function loadDevices() {
-    const container = document.getElementById('device-list');
-    container.innerHTML = '<div class="spinner">Connecting...</div>';
-    try {
-      const result = await req('/auth/exchange', { redirectUrl: _pastedUrl });
-      if (!result.devices || result.devices.length === 0) {
-        container.innerHTML = '<div class="card">No devices found on this account.</div>';
-        return;
-      }
-      container.innerHTML = '<h2>Select a device</h2>' + result.devices.map((d, i) => {
         return '<div class="device-card">' +
-          '<div class="device-info">' +
-            '<div class="card-label">' + escHtml(d.name || 'Air Purifier') + '</div>' +
-            '<div class="card-sub">' + escHtml(d.modelName || d.uuid) + '</div>' +
+          '<div>' +
+            '<h3>' + escHtml(device.name || 'Air Purifier') + '</h3>' +
+            '<div class="meta"><span class="badge ' + escAttr(meta.badge) + '">' + escHtml(meta.label) + '</span>' +
+            escHtml(endpoint) + '</div>' +
+            (extra ? '<div class="meta">' + escHtml(extra) + '</div>' : '') +
           '</div>' +
-          '<input class="device-name-input" id="name-' + i + '" type="text" value="' + escAttr(d.name || 'Philips Air Purifier') + '">' +
-          '<button onclick="saveDevice(' + escHtml(JSON.stringify(d.uuid)) + ', ' + i + ')">Save &amp; Connect</button>' +
+          '<div class="device-actions">' +
+            '<button class="secondary" type="button" onclick="editDevice(' + index + ')">Edit</button>' +
+            '<button class="danger" type="button" onclick="deleteDevice(' + index + ')">Delete</button>' +
+          '</div>' +
         '</div>';
       }).join('');
-    } catch (_e) {
-      container.innerHTML = '<div class="card">Failed to load devices. <button onclick="goToStep(1)">Try again</button></div>';
     }
-  }
 
-  async function saveDevice(uuid, idx) {
-    const nameInput = document.getElementById('name-' + idx);
-    const name = nameInput ? nameInput.value.trim() : '';
-    try {
+    function openLocalEditor() {
+      editingIndex = null;
+      editingDevice = null;
+      document.getElementById('editor-title').textContent = 'Add Device';
+      document.getElementById('device-submit').textContent = 'Add Device';
+      fillEditor({
+        name: 'Air Purifier',
+        host: '',
+        protocol: 'coap',
+        useHttps: false,
+        clientId: '',
+        hasClientSecret: false,
+        hasEncryptionKey: false,
+        airplusDeviceUuid: '',
+        airplusTokenFile: '',
+        pythonPath: '',
+        apiScriptPath: '',
+      });
+      document.getElementById('device-editor').hidden = false;
+      closeAirplusFlow(false);
+    }
+
+    function editDevice(index) {
+      editingIndex = index;
+      editingDevice = { ...(state.devices[index] || {}) };
+      document.getElementById('editor-title').textContent = 'Edit Device';
+      document.getElementById('device-submit').textContent = 'Update Device';
+      fillEditor(editingDevice);
+      document.getElementById('device-editor').hidden = false;
+      closeAirplusFlow(false);
+    }
+
+    function fillEditor(device) {
+      document.getElementById('device-name').value = device.name || 'Air Purifier';
+      document.getElementById('device-host').value = device.host || '';
+      document.getElementById('device-protocol').value = device.protocol || 'coap';
+      document.getElementById('device-use-https').checked = Boolean(device.useHttps);
+      document.getElementById('device-client-id').value = device.clientId || '';
+      document.getElementById('device-client-secret').value = device.clientSecret || '';
+      document.getElementById('device-encryption-key').value = device.encryptionKey || '';
+      document.getElementById('clear-client-secret').checked = false;
+      document.getElementById('clear-encryption-key').checked = false;
+      document.getElementById('airplus-uuid').value = device.airplusDeviceUuid || '';
+      document.getElementById('airplus-token-file').value = device.airplusTokenFile || '';
+      document.getElementById('device-python-path').value = device.pythonPath || '';
+      document.getElementById('device-api-script-path').value = device.apiScriptPath || '';
+
+      const secretState = document.getElementById('client-secret-state');
+      const clearSecretRow = document.getElementById('clear-client-secret-row');
+      const secretInput = document.getElementById('device-client-secret');
+      if (device.hasClientSecret && !device.clientSecret) {
+        secretState.textContent = 'Saved secret will be preserved unless replaced or cleared.';
+        secretInput.placeholder = 'Saved - leave blank to keep';
+        clearSecretRow.hidden = false;
+      } else {
+        secretState.textContent = '';
+        secretInput.placeholder = 'Optional';
+        clearSecretRow.hidden = true;
+      }
+
+      const keyState = document.getElementById('encryption-key-state');
+      const clearKeyRow = document.getElementById('clear-encryption-key-row');
+      const keyInput = document.getElementById('device-encryption-key');
+      if (device.hasEncryptionKey && !device.encryptionKey) {
+        keyState.textContent = 'Saved key will be preserved unless replaced or cleared.';
+        keyInput.placeholder = 'Saved - leave blank to keep';
+        clearKeyRow.hidden = false;
+      } else {
+        keyState.textContent = '';
+        keyInput.placeholder = 'Optional';
+        clearKeyRow.hidden = true;
+      }
+
+      renderProtocolFields();
+    }
+
+    function renderProtocolFields() {
+      const protocol = document.getElementById('device-protocol').value;
+      const isHomeId = protocol === 'homeid-http';
+      const isAirplus = protocol === 'airplus-cloud';
+      document.getElementById('homeid-fields').hidden = !isHomeId;
+      document.getElementById('airplus-fields').hidden = !isAirplus;
+      document.getElementById('host-field').hidden = isAirplus;
+    }
+
+    function saveDeviceForm(event) {
+      event.preventDefault();
+      const protocol = document.getElementById('device-protocol').value;
+      const name = document.getElementById('device-name').value.trim();
+      const host = document.getElementById('device-host').value.trim();
+      const airplusUuid = document.getElementById('airplus-uuid').value.trim();
+
+      if (!name) {
+        showStatus('Device name is required.', 'error');
+        return;
+      }
+      if (protocol === 'airplus-cloud') {
+        if (!airplusUuid) {
+          showStatus('Air+ device UUID is required.', 'error');
+          return;
+        }
+      } else if (!isValidIpv4(host)) {
+        showStatus('Device host must be a valid IPv4 address.', 'error');
+        return;
+      }
+
+      const original = editingDevice || {};
+      const clientSecret = document.getElementById('device-client-secret').value.trim();
+      const encryptionKey = document.getElementById('device-encryption-key').value.trim();
+      const clearClientSecret = document.getElementById('clear-client-secret').checked;
+      const clearEncryptionKey = document.getElementById('clear-encryption-key').checked;
+
+      const device = {
+        _uiKey: original._uiKey,
+        name,
+        host: protocol === 'airplus-cloud' ? 'cloud' : host,
+        protocol,
+        useHttps: document.getElementById('device-use-https').checked,
+        clientId: document.getElementById('device-client-id').value.trim(),
+        clientSecret,
+        clearClientSecret,
+        encryptionKey,
+        clearEncryptionKey,
+        airplusDeviceUuid: airplusUuid,
+        airplusTokenFile: document.getElementById('airplus-token-file').value.trim(),
+        pythonPath: document.getElementById('device-python-path').value.trim(),
+        apiScriptPath: document.getElementById('device-api-script-path').value.trim(),
+        hasClientSecret: Boolean(clientSecret) || (Boolean(original.hasClientSecret) && !clearClientSecret),
+        hasEncryptionKey: Boolean(encryptionKey) || (Boolean(original.hasEncryptionKey) && !clearEncryptionKey),
+      };
+
+      if (editingIndex === null) {
+        state.devices.push(device);
+      } else {
+        state.devices[editingIndex] = device;
+      }
+      dirty = true;
+      closeEditor();
+      renderDevices();
+      updateSaveButton();
+      showStatus('Device staged. Click Save Configuration to write it to Homebridge.', 'info');
+    }
+
+    function deleteDevice(index) {
+      const device = state.devices[index];
+      const name = device && device.name ? device.name : 'this device';
+      if (!confirm('Delete ' + name + '?')) return;
+      state.devices.splice(index, 1);
+      dirty = true;
+      closeEditor();
+      renderDevices();
+      updateSaveButton();
+      if (device && device.protocol === 'airplus-cloud') {
+        showStatus('Air+ device removed from staged config. Click Save Configuration to write the change. The Air+ token file remains on disk for manual cleanup.', 'info');
+      } else {
+        showStatus('Device removed. Click Save Configuration to write the change.', 'info');
+      }
+    }
+
+    function closeEditor() {
+      document.getElementById('device-editor').hidden = true;
+      editingIndex = null;
+      editingDevice = null;
+    }
+
+    async function startAirplusSetup() {
+      if (dirty) {
+        showStatus('Save or refresh staged device changes before starting Air+ setup.', 'error');
+        return;
+      }
+      hideStatus();
+      closeEditor();
+      document.getElementById('airplus-flow').hidden = false;
+      setAirplusStep(1);
+      const authWindow = window.open('about:blank', '_blank');
+      try {
+        const result = await req('/auth/init');
+        document.getElementById('auth-link').href = result.url;
+        if (authWindow) {
+          authWindow.location = result.url;
+        }
+      } catch (_error) {
+        if (authWindow) authWindow.close();
+        closeAirplusFlow(false);
+      }
+    }
+
+    function closeAirplusFlow(showMessage) {
+      document.getElementById('airplus-flow').hidden = true;
+      document.getElementById('redirect-url').value = '';
+      document.getElementById('airplus-device-list').innerHTML = '<div class="empty">Connecting...</div>';
+      pastedAirplusUrl = '';
+      if (showMessage) showStatus('Air+ setup cancelled.', 'info');
+    }
+
+    function setAirplusStep(step) {
+      document.querySelectorAll('.airplus-step').forEach((el) => el.classList.remove('active'));
+      document.getElementById('airplus-step-' + step).classList.add('active');
+    }
+
+    async function exchangeAirplusCode() {
+      pastedAirplusUrl = document.getElementById('redirect-url').value.trim();
+      if (!pastedAirplusUrl) {
+        showStatus('Paste the Air+ redirect URL before continuing.', 'error');
+        return;
+      }
+      setAirplusStep(2);
+      const container = document.getElementById('airplus-device-list');
+      container.innerHTML = '<div class="empty">Connecting...</div>';
+      try {
+        const result = await req('/auth/exchange', { redirectUrl: pastedAirplusUrl });
+        renderAirplusDevices(result.devices || []);
+      } catch (_error) {
+        setAirplusStep(1);
+      }
+    }
+
+    function renderAirplusDevices(devices) {
+      const container = document.getElementById('airplus-device-list');
+      if (devices.length === 0) {
+        container.innerHTML = '<div class="empty">No Air+ devices found on this account.</div>';
+        return;
+      }
+
+      container.innerHTML = devices.map((device, index) => {
+        return '<div class="device-card">' +
+          '<div>' +
+            '<h3>' + escHtml(device.name || 'Air Purifier') + '</h3>' +
+            '<div class="meta">' + escHtml(device.modelName || device.uuid || 'Air+ device') + '</div>' +
+            '<input id="airplus-name-' + index + '" type="text" value="' + escAttr(device.name || 'Philips Air Purifier') + '">' +
+          '</div>' +
+          '<div class="device-actions">' +
+            '<button type="button" onclick="saveAirplusDevice(' + escAttr(JSON.stringify(device.uuid)) + ', ' + index + ')">Save Air+ Device</button>' +
+          '</div>' +
+        '</div>';
+      }).join('');
+    }
+
+    async function saveAirplusDevice(uuid, index) {
+      const nameInput = document.getElementById('airplus-name-' + index);
+      const name = nameInput ? nameInput.value.trim() : '';
       const result = await req('/auth/save', { uuid, name });
-      document.getElementById('success-title').textContent = '✓ ' + (name || 'Device') + ' connected!';
-      document.getElementById('token-path').textContent = 'Token file: ' + result.tokenPath;
-      goToStep(3);
-    } catch (_e) {
-      // error already shown
+      await loadConfig();
+      showStatus('Air+ device saved. Token file: ' + result.tokenPath + '. Restart Homebridge for the device to load.', 'success');
     }
-  }
 
-  function escHtml(str) {
-    return String(str)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
-  }
+    function updateSaveButton() {
+      document.getElementById('save-config').disabled = !dirty;
+    }
 
-  function escAttr(str) {
-    return String(str).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-  }
+    function markDirty() {
+      dirty = true;
+      updateSaveButton();
+    }
 
-  // Initialise
-  loadExistingDevices();
-</script>
+    function showStatus(message, type) {
+      const status = document.getElementById('status');
+      status.className = 'status ' + (type || 'info');
+      status.textContent = message;
+    }
+
+    function hideStatus() {
+      const status = document.getElementById('status');
+      status.className = 'status';
+      status.textContent = '';
+    }
+
+    function secretSummary(device) {
+      const parts = [];
+      if (device.clientId) parts.push('client ID');
+      if (device.hasClientSecret) parts.push('client secret');
+      if (device.hasEncryptionKey) parts.push('encryption key');
+      return parts.length ? ' | Saved: ' + parts.join(', ') : '';
+    }
+
+    function tokenSummary(device) {
+      return device.airplusTokenFile ? 'Token file: ' + device.airplusTokenFile : 'Token file: default path';
+    }
+
+    function shortValue(value) {
+      const text = String(value || '');
+      return text.length > 12 ? text.slice(0, 12) + '...' : text;
+    }
+
+    function isValidIpv4(host) {
+      const parts = String(host || '').split('.');
+      return parts.length === 4 && parts.every((part) => /^\d{1,3}$/.test(part) && Number(part) <= 255);
+    }
+
+    function escHtml(value) {
+      return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function escAttr(value) {
+      return escHtml(value);
+    }
+
+    document.getElementById('platform-name').addEventListener('input', markDirty);
+    loadConfig();
+  </script>
 </body>
 </html>
