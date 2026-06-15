@@ -6,6 +6,23 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [3.2.4] — 15/06/2026
+
+### Fixed
+
+- Air+ Cloud login: detect and handle the Philips consent proxy page URL
+  (`accounts.home.id/authui/client/proxy?mode=afterConsent&…`) that some browsers navigate to
+  instead of the `com.philips.air://loginredirect?code=…` deep-link redirect. The server now
+  fetches the proxy page server-side and attempts to extract the authorisation code automatically.
+  If the code cannot be extracted, a clear error explains exactly where to find the correct URL.
+- Air+ Cloud login: rewrote the step-by-step instructions to explain that the browser will try to
+  open the Philips Air app, that the address bar will show the `com.philips.air://` URL at that
+  moment, and that both the deep-link URL and the Philips proxy page URL can be pasted.
+- Air+ Cloud login: improved the generic "No authorisation code found" error to include specific
+  guidance on what URL to look for and where.
+
+---
+
 ## [3.2.3] — 15/06/2026
 
 ### Changed

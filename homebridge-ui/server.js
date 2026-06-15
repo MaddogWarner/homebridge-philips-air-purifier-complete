@@ -59,12 +59,43 @@ class AirPlusSetupServer extends HomebridgePluginUiServer {
       throw new Error('Redirect URL is required');
     }
 
-    // Replace custom scheme with https:// so URL can parse it
-    const parseable = redirectUrl.replace('com.philips.air://', 'https://x/');
-    const parsed = new URL(parseable);
-    const code = parsed.searchParams.get('code');
-    if (!code) {
-      throw new Error('No authorisation code found in redirect URL');
+    let code = null;
+
+    if (redirectUrl.includes('accounts.home.id/authui/client/proxy')) {
+      // User pasted the Philips consent proxy page URL instead of the final deep-link redirect.
+      // Fetch the proxy page and try to extract com.philips.air://loginredirect?code=... from the HTML.
+      try {
+        const proxyUrl = new URL(redirectUrl);
+        const html = await this._httpsGetRaw({
+          hostname: proxyUrl.hostname,
+          path: proxyUrl.pathname + proxyUrl.search,
+          headers: { 'User-Agent': USER_AGENT, Accept: 'text/html' },
+        });
+        const m = html.match(/com\.philips\.air:\/\/loginredirect[^\s"'\\]*code=([^&\s"'\\]+)/);
+        if (m) code = decodeURIComponent(m[1]);
+      } catch (_) { /* fall through to descriptive error */ }
+
+      if (!code) {
+        throw new Error(
+          'This is the Philips login confirmation page, not the final redirect URL. ' +
+          'After approving access your browser will try to open the Philips Air app — ' +
+          'look at your address bar at that moment; it will show a URL starting with ' +
+          '"com.philips.air://loginredirect?code=…". Copy that URL and paste it here.'
+        );
+      }
+    } else {
+      // Normal path: user pasted the com.philips.air:// deep-link URL (or similar)
+      const parseable = redirectUrl.replace(/^com\.philips\.air:\/\//, 'https://x/');
+      let parsed;
+      try { parsed = new URL(parseable); } catch (_) { parsed = null; }
+      code = parsed && parsed.searchParams.get('code');
+      if (!code) {
+        throw new Error(
+          'No authorisation code found in redirect URL. ' +
+          'Paste the full URL from your browser’s address bar after approving access — ' +
+          'it should start with “com.philips.air://loginredirect?code=…”.'
+        );
+      }
     }
 
     const tokenBody = new URLSearchParams({
@@ -175,6 +206,18 @@ class AirPlusSetupServer extends HomebridgePluginUiServer {
       if (postBody) {
         req.write(postBody);
       }
+      req.end();
+    });
+  }
+
+  _httpsGetRaw(options) {
+    return new Promise((resolve, reject) => {
+      const req = https.request(options, (res) => {
+        const chunks = [];
+        res.on('data', (chunk) => chunks.push(chunk));
+        res.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+      });
+      req.on('error', reject);
       req.end();
     });
   }
