@@ -6,6 +6,22 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [3.2.5] — 15/06/2026
+
+### Fixed
+
+- Air+ Cloud login: extract the authorisation code directly from the URL the user pastes —
+  whether it is the `com.philips.air://loginredirect?code=…` deep link or the `accounts.home.id`
+  consent/proxy page — by parsing the query string, then the URL fragment, then a regex fallback.
+  The v3.2.4 approach refetched the proxy page server-side, which could never succeed because the
+  authorisation code is bound to the user's authenticated browser session; that refetch is now only
+  a last resort. This is the fix for testers who reported the proxy page error after approving access.
+- Air+ Cloud login: reworded the on-screen steps so the `accounts.home.id` URL is presented as an
+  equally valid thing to paste, not a fallback, since many desktop browsers never leave the
+  `com.philips.air://` URL in the address bar.
+
+---
+
 ## [3.2.4] — 15/06/2026
 
 ### Fixed

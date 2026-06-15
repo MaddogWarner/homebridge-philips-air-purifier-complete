@@ -59,11 +59,16 @@ class AirPlusSetupServer extends HomebridgePluginUiServer {
       throw new Error('Redirect URL is required');
     }
 
-    let code = null;
+    // The authorisation code lives in the URL the user copied — whether that is the
+    // com.philips.air:// deep link or the accounts.home.id consent/proxy page that
+    // many desktop browsers land on instead. Parse it directly (query → fragment →
+    // regex), mirroring scripts/airplus_setup.py.
+    let code = this._extractCode(redirectUrl);
 
-    if (redirectUrl.includes('accounts.home.id/authui/client/proxy')) {
-      // User pasted the Philips consent proxy page URL instead of the final deep-link redirect.
-      // Fetch the proxy page and try to extract com.philips.air://loginredirect?code=... from the HTML.
+    // Last resort: the user pasted a Philips consent page that did not carry the
+    // code in its own URL. Fetch it and scan for an embedded deep link. This only
+    // works if the page is reachable unauthenticated, so treat failure as benign.
+    if (!code && redirectUrl.includes('accounts.home.id')) {
       try {
         const proxyUrl = new URL(redirectUrl);
         const html = await this._httpsGetRaw({
@@ -74,28 +79,17 @@ class AirPlusSetupServer extends HomebridgePluginUiServer {
         const m = html.match(/com\.philips\.air:\/\/loginredirect[^\s"'\\]*code=([^&\s"'\\]+)/);
         if (m) code = decodeURIComponent(m[1]);
       } catch (_) { /* fall through to descriptive error */ }
+    }
 
-      if (!code) {
-        throw new Error(
-          'This is the Philips login confirmation page, not the final redirect URL. ' +
-          'After approving access your browser will try to open the Philips Air app — ' +
-          'look at your address bar at that moment; it will show a URL starting with ' +
-          '"com.philips.air://loginredirect?code=…". Copy that URL and paste it here.'
-        );
-      }
-    } else {
-      // Normal path: user pasted the com.philips.air:// deep-link URL (or similar)
-      const parseable = redirectUrl.replace(/^com\.philips\.air:\/\//, 'https://x/');
-      let parsed;
-      try { parsed = new URL(parseable); } catch (_) { parsed = null; }
-      code = parsed && parsed.searchParams.get('code');
-      if (!code) {
-        throw new Error(
-          'No authorisation code found in redirect URL. ' +
-          'Paste the full URL from your browser’s address bar after approving access — ' +
-          'it should start with “com.philips.air://loginredirect?code=…”.'
-        );
-      }
+    if (!code) {
+      throw new Error(
+        'No authorisation code found in that URL. After approving access, copy the ' +
+        'full URL from your browser’s address bar and paste it here — it will start ' +
+        'with either "com.philips.air://loginredirect?code=…" or an "accounts.home.id" ' +
+        'address containing "code=…". If you only see a Philips confirmation page with ' +
+        'no "code=" in its address, log in again and copy the URL the moment the page ' +
+        'finishes loading.'
+      );
     }
 
     const tokenBody = new URLSearchParams({
@@ -181,6 +175,30 @@ class AirPlusSetupServer extends HomebridgePluginUiServer {
     fs.chmodSync(tokenPath, 0o600);
 
     return { success: true, uuid, name: name || 'Philips Air Purifier', tokenFile: tokenPath };
+  }
+
+  _extractCode(redirectUrl) {
+    const trimmed = String(redirectUrl || '').trim();
+    if (!trimmed) return null;
+
+    // Normalise the custom scheme so the URL parser accepts it.
+    const normalised = trimmed.replace(/^com\.philips\.air:\/\//i, 'https://airplus.local/');
+    let parsed = null;
+    try { parsed = new URL(normalised); } catch (_) { parsed = null; }
+
+    if (parsed) {
+      const fromQuery = parsed.searchParams.get('code');
+      if (fromQuery) return fromQuery;
+      // OIDC may return the response in the URL fragment (#code=…&state=…).
+      if (parsed.hash && parsed.hash.length > 1) {
+        const fromFragment = new URLSearchParams(parsed.hash.slice(1)).get('code');
+        if (fromFragment) return fromFragment;
+      }
+    }
+
+    // Fallback for unusual encodings the URL parser may not split cleanly.
+    const m = trimmed.match(/[?&#]code=([^&\s"'\\]+)/);
+    return m ? decodeURIComponent(m[1]) : null;
   }
 
   _httpsRequest(options, postBody) {

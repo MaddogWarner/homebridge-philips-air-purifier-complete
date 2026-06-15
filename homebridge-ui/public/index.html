@@ -265,9 +265,8 @@
           <ol style="color: var(--muted); font-size: 13px; padding-left: 20px; margin: 0 0 14px; line-height: 1.7;">
             <li><a id="auth-link" href="#" target="_blank" rel="noopener">Open the Philips login page</a> (a new tab will open automatically — click the link if it didn't).</li>
             <li>Log in to your Philips account and approve access when prompted.</li>
-            <li>Your browser will try to open the Philips Air app. If it can't, it will show an error or a Philips page — this is expected.</li>
-            <li>Check your browser's <strong style="color: var(--text);">address bar</strong> at that moment. It should show a URL starting with <code style="background:#1a1a1a; padding: 1px 4px; border-radius: 3px; font-size: 12px;">com.philips.air://loginredirect?code=…</code> — copy and paste that here.</li>
-            <li>If your address bar shows a Philips website (like <em>accounts.home.id</em>), paste that URL here instead — we'll try to extract the code automatically.</li>
+            <li>After approving, your browser will try to open the Philips Air app and will land on either an error page or a Philips page (<em>accounts.home.id</em>) — this is expected.</li>
+            <li>Copy the <strong style="color: var(--text);">full URL from your browser's address bar</strong> and paste it below. It works whether it starts with <code style="background:#1a1a1a; padding: 1px 4px; border-radius: 3px; font-size: 12px;">com.philips.air://loginredirect?code=…</code> or is an <em>accounts.home.id</em> address — as long as it contains <code style="background:#1a1a1a; padding: 1px 4px; border-radius: 3px; font-size: 12px;">code=…</code>.</li>
           </ol>
           <div class="field">
             <label for="redirect-url">Redirect URL (from your browser's address bar)</label>
