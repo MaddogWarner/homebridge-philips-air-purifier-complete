@@ -649,7 +649,7 @@ class PhilipsAirPurifierAccessory {
         this.updatePurifierCharacteristics();
       });
 
-    this.purifierService.addCharacteristic(Characteristic.RotationSpeed)
+    this.purifierService.getCharacteristic(Characteristic.RotationSpeed)
       .onGet(() => MODE_TO_SPEED[this.state.mode] ?? 100)
       .onSet(async (value) => {
         this.log.info(`[SET] RotationSpeed: ${value}%`);
@@ -665,7 +665,7 @@ class PhilipsAirPurifierAccessory {
       });
 
     // Child Lock (LockPhysicalControls)
-    this.purifierService.addCharacteristic(Characteristic.LockPhysicalControls)
+    this.purifierService.getCharacteristic(Characteristic.LockPhysicalControls)
       .onGet(() => this.state.childLock
         ? Characteristic.LockPhysicalControls.CONTROL_LOCK_ENABLED
         : Characteristic.LockPhysicalControls.CONTROL_LOCK_DISABLED)
@@ -681,7 +681,7 @@ class PhilipsAirPurifierAccessory {
       this.platformAcc.addService(Service.AirQualitySensor, 'Air Quality');
     this.airQualitySensor.getCharacteristic(Characteristic.AirQuality)
       .onGet(() => this.pm25ToAirQuality(this.state.pm25));
-    this.airQualitySensor.addCharacteristic(Characteristic.PM2_5Density)
+    this.airQualitySensor.getCharacteristic(Characteristic.PM2_5Density)
       .onGet(() => this.state.pm25 || 0);
 
     // HEPA Filter Maintenance
@@ -724,7 +724,7 @@ class PhilipsAirPurifierAccessory {
         await this.executeCommand('light', [level.toString()], { lightLevel: level });
         this.updateLightCharacteristics();
       });
-    this.lightService.addCharacteristic(Characteristic.Brightness)
+    this.lightService.getCharacteristic(Characteristic.Brightness)
       .onGet(() => {
         if (this.state.lightLevel === LIGHT.DIM) return 50;
         if (this.state.lightLevel === LIGHT.OFF) return 0;

@@ -6,6 +6,17 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [3.2.2] — 15/06/2026
+
+### Fixed
+
+- Fixed a Homebridge crash loop when restoring cached purifier accessories after the first
+  successful v3 platform startup. Optional HomeKit characteristics are now reused instead of
+  added again on restored services.
+- Corrected package lockfile version metadata after the v3.2.1 release.
+
+---
+
 ## [3.2.1] — 15/06/2026
 
 ### Fixed
