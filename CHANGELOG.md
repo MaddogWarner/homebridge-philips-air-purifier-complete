@@ -16,6 +16,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ### Fixed
 
 - Added clear validation errors for malformed **Additional Devices JSON** in the custom UI server.
+- Replaced SHA-1 with SHA-256 for deterministic custom UI device row keys.
 
 ---
 

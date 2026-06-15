@@ -372,7 +372,7 @@ class AirPlusSetupServer extends HomebridgePluginUiServer {
       device.protocol || 'coap',
       device.name || '',
     ]);
-    return crypto.createHash('sha1').update(source).digest('hex').slice(0, 16);
+    return crypto.createHash('sha256').update(source).digest('hex').slice(0, 16);
   }
 
   _cleanString(value) {
