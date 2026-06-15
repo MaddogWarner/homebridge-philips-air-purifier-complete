@@ -2,7 +2,7 @@
   "pluginAlias": "PhilipsAirPurifier",
   "pluginType": "platform",
   "singular": true,
-  "headerDisplay": "<p align='center'><img src='https://raw.githubusercontent.com/MaddogWarner/homebridge-philips-air-purifier-complete/main/icon.png' width='150' alt='Philips Air Purifier'></p><div style='margin-top:16px;padding:12px 16px;background:#fff3e0;border-left:4px solid #e88122;border-radius:4px;color:#5d3a00;font-size:14px;'><strong>Device setup is managed in Plugin Settings when available.</strong><br>If Homebridge does not show the Plugin Settings cog, add extra purifiers in <strong>Additional Devices JSON</strong> below or edit the real <strong>devices</strong> array in the JSON Config tab. The nested visual device editor is intentionally disabled because Homebridge renders it incorrectly.</div>",
+  "headerDisplay": "<p align='center'><img src='https://raw.githubusercontent.com/MaddogWarner/homebridge-philips-air-purifier-complete/main/icon.png' width='150' alt='Philips Air Purifier'></p><div style='margin-top:16px;padding:12px 16px;background:#eaf4ff;border-left:4px solid #2f80c9;border-radius:4px;color:#17324d;font-size:14px;'><strong>Manage devices in the tabs below.</strong><br>Add one tab per purifier and choose the matching protocol. Air+ Cloud users can open <strong>Plugin Settings</strong> and click <strong>Login with Air+ (cloud devices)</strong> to create the token file and add the device automatically.</div>",
   "schema": {
     "type": "object",
     "properties": {
@@ -11,13 +11,169 @@
         "type": "string",
         "default": "Philips Air Purifiers"
       },
-      "additionalDevicesJson": {
-        "title": "Additional Devices JSON",
-        "type": "string",
-        "format": "textarea",
-        "default": "",
-        "description": "Optional fallback when Plugin Settings is unavailable. Paste a JSON array of extra or overriding device entries, for example: [{\"name\":\"Bedroom\",\"host\":\"192.168.1.101\",\"protocol\":\"coap\"}]. Entries with the same host or Air+ UUID override the hidden devices[] entry at runtime."
+      "devices": {
+        "title": "Devices",
+        "type": "array",
+        "default": [],
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "title": "Name",
+              "type": "string",
+              "required": true,
+              "default": "Air Purifier",
+              "description": "The name of this purifier as it appears in HomeKit."
+            },
+            "protocol": {
+              "title": "Protocol",
+              "type": "string",
+              "default": "coap",
+              "oneOf": [
+                {
+                  "title": "CoAP local",
+                  "enum": ["coap"]
+                },
+                {
+                  "title": "HTTP DH/AES local",
+                  "enum": ["http"]
+                },
+                {
+                  "title": "HomeID local HTTP",
+                  "enum": ["homeid-http"]
+                },
+                {
+                  "title": "Air+ Cloud",
+                  "enum": ["airplus-cloud"]
+                }
+              ],
+              "description": "Communication protocol for this device."
+            },
+            "host": {
+              "title": "IP Address",
+              "type": "string",
+              "format": "ipv4",
+              "placeholder": "192.168.1.100",
+              "description": "IPv4 address used by CoAP, HTTP, and HomeID local devices."
+            },
+            "useHttps": {
+              "title": "Use HTTPS for HomeID",
+              "type": "boolean",
+              "default": false,
+              "description": "Use HTTPS for HomeID local HTTP devices with self-signed certificates."
+            },
+            "clientId": {
+              "title": "HomeID Client ID",
+              "type": "string",
+              "required": false,
+              "x-schema-form": {
+                "type": "password"
+              },
+              "description": "Base64 HomeID local API client ID. Only required for devices that return a PhilipsCondor authentication challenge."
+            },
+            "clientSecret": {
+              "title": "HomeID Client Secret",
+              "type": "string",
+              "required": false,
+              "x-schema-form": {
+                "type": "password"
+              },
+              "description": "Base64 HomeID local API client secret. Only required for devices that return a PhilipsCondor authentication challenge."
+            },
+            "encryptionKey": {
+              "title": "HomeID Encryption Key",
+              "type": "string",
+              "required": false,
+              "x-schema-form": {
+                "type": "password"
+              },
+              "description": "Optional hex AES key for HomeID local HTTP payload encryption. Leave blank unless you already know it."
+            },
+            "airplusDeviceUuid": {
+              "title": "Air+ Device UUID",
+              "type": "string",
+              "required": false,
+              "description": "Device UUID for Philips Air+ Cloud. Filled automatically by Login with Air+."
+            },
+            "airplusTokenFile": {
+              "title": "Air+ Token File Path",
+              "type": "string",
+              "required": false,
+              "placeholder": "~/.homebridge/philips-airplus-{uuid}.json",
+              "description": "Path to the Air+ token file. Filled automatically by Login with Air+."
+            },
+            "pythonPath": {
+              "title": "Python Path",
+              "type": "string",
+              "required": false,
+              "placeholder": "Auto-detected",
+              "description": "Optional path to Python 3.12 or newer. Leave blank to use the bundled virtual environment."
+            },
+            "apiScriptPath": {
+              "title": "API Script Path",
+              "type": "string",
+              "required": false,
+              "placeholder": "Bundled philips_air_api.py",
+              "description": "Optional path to a replacement philips_air_api.py script. Leave blank for the bundled script."
+            }
+          }
+        }
       }
     }
-  }
+  },
+  "layout": [
+    {
+      "key": "name"
+    },
+    {
+      "key": "devices",
+      "type": "tabarray",
+      "title": "{{ value.name || 'New Device' }}",
+      "buttonText": "Add Device",
+      "items": [
+        "devices[].name",
+        "devices[].protocol",
+        {
+          "key": "devices[].host",
+          "condition": {
+            "functionBody": "return model.devices && model.devices[arrayIndices[0]] && model.devices[arrayIndices[0]].protocol !== 'airplus-cloud';"
+          }
+        },
+        {
+          "type": "fieldset",
+          "title": "HomeID Local HTTP",
+          "condition": {
+            "functionBody": "return model.devices && model.devices[arrayIndices[0]] && model.devices[arrayIndices[0]].protocol === 'homeid-http';"
+          },
+          "items": [
+            "devices[].useHttps",
+            "devices[].clientId",
+            "devices[].clientSecret",
+            "devices[].encryptionKey"
+          ]
+        },
+        {
+          "type": "fieldset",
+          "title": "Air+ Cloud",
+          "condition": {
+            "functionBody": "return model.devices && model.devices[arrayIndices[0]] && model.devices[arrayIndices[0]].protocol === 'airplus-cloud';"
+          },
+          "items": [
+            "devices[].airplusDeviceUuid",
+            "devices[].airplusTokenFile"
+          ]
+        },
+        {
+          "type": "fieldset",
+          "title": "Advanced",
+          "expandable": true,
+          "expanded": false,
+          "items": [
+            "devices[].pythonPath",
+            "devices[].apiScriptPath"
+          ]
+        }
+      ]
+    }
+  ]
 }

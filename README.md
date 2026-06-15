@@ -339,27 +339,17 @@ For HomeID/Condor local HTTP devices:
 }
 ```
 
-Use **Plugin Settings** to add, edit, or remove CoAP, HTTP, HomeID, and Air+ cloud devices when
-Homebridge exposes the settings cog. Some Homebridge UI states only show the normal **Plugin
-Config** modal; in that case use **Additional Devices JSON** to add extra purifiers without using
-the broken nested visual device editor.
+Use the Homebridge plugin configuration form to add, edit, or remove CoAP, HTTP, HomeID, and
+Air+ cloud devices. The form presents `devices[]` as one tab per purifier, with protocol-specific
+fields shown only when they apply.
 
-Example **Additional Devices JSON** value:
+Air+ cloud devices also need an account token. Open **Plugin Settings**, click
+**Login with Air+ (cloud devices)**, complete the Air+ login flow, select the device, then review
+the new Air+ tab in the native form and click **Save**.
 
-```json
-[
-  {
-    "name": "Bedroom Air Purifier",
-    "host": "192.168.1.101",
-    "protocol": "coap"
-  }
-]
-```
-
-Entries in **Additional Devices JSON** are merged with the main `devices[]` array at runtime. If an
-entry uses the same `host` or `airplusDeviceUuid` as an existing device, the additional entry
-overrides the existing one. The **JSON Config** tab remains supported for direct edits to the real
-`devices[]` array.
+The **JSON Config** tab remains supported for direct edits to `devices[]`. Existing v3.1
+installations that still contain `additionalDevicesJson` continue to merge those entries at
+runtime for backwards compatibility, but that field is no longer shown in the GUI.
 
 ### Configuration Options
 
@@ -378,7 +368,7 @@ overrides the existing one. The **JSON Config** tab remains supported for direct
 | `devices[].airplusDeviceUuid` | Yes for Air+ | — | Philips Air+ device UUID. Filled automatically by the setup wizard. |
 | `devices[].airplusTokenFile` | No | `~/.homebridge/philips-airplus-{uuid}.json` | Token file written by the setup wizard or CLI setup script. |
 | `devices[].pythonPath` | No | Auto-detected | Path to Python 3.12 or newer with `aiocoap` and `pycryptodomex` installed. Leave blank to use the plugin's bundled virtual environment. |
-| `additionalDevicesJson` | No | — | Fallback JSON array used by the normal Plugin Config modal when Plugin Settings is unavailable. Additional entries are merged with `devices[]` at runtime. |
+| `additionalDevicesJson` | No | — | Legacy v3.1 runtime fallback. Additional entries are still merged with `devices[]`, but this field is no longer shown in the GUI. |
 
 ### Model Compatibility
 
@@ -399,16 +389,17 @@ If your device shows `Network error: NetworkError` on every command, try setting
 
 1. Install the plugin via the Homebridge UI
 2. Go to **Plugins → Philips Air Purifier → Plugin Settings**
-3. Click **"Add Air+ Device"**
+3. Click **"Login with Air+ (cloud devices)"**
 4. Click **"Open Philips login"** and log in with your Philips account
 5. Your browser shows an error page - **copy the full URL from the address bar**
 6. Paste it into the setup page and click **Continue**
-7. Click **"Save Air+ Device"** next to your device
-8. Restart Homebridge
+7. Click **"Add to Form"** next to your device
+8. Review the new Air+ device tab and click **Save**
+9. Restart Homebridge
 
 Each device needs its own setup run. Run through the wizard once per purifier.
 
-Deleting an Air+ device in **Plugin Settings** removes it from the Homebridge config only. The
+Deleting an Air+ device from the Homebridge form removes it from the Homebridge config only. The
 token file is intentionally left on disk at `~/.homebridge/philips-airplus-{uuid}.json` so an
 accidental delete does not revoke local setup state. Remove that file manually if you are cleaning
 up an Air+ device permanently.

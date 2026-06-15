@@ -6,6 +6,24 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [3.2.0] — 15/06/2026
+
+### Added
+
+- Restored native Homebridge GUI device configuration for CoAP, HTTP, HomeID, and Air+ Cloud
+  devices using a tabbed `devices[]` form with protocol-specific fields.
+- Kept the Air+ OAuth login flow as a lightweight **Login with Air+ (cloud devices)** helper that
+  writes the token file and adds the selected device to the native form.
+
+### Changed
+
+- Removed the **Additional Devices JSON** field from the GUI. Existing `additionalDevicesJson`
+  configs continue to merge at runtime for v3.1 backwards compatibility.
+- Stopped the custom UI from owning normal device add/edit/delete operations; the native schema
+  form is now the single source of truth for saved device configuration.
+
+---
+
 ## [3.1.1] — 14/06/2026
 
 ### Added
