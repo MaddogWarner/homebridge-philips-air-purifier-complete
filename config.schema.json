@@ -2,7 +2,8 @@
   "pluginAlias": "PhilipsAirPurifier",
   "pluginType": "platform",
   "singular": true,
-  "headerDisplay": "<p align='center'><img src='https://raw.githubusercontent.com/MaddogWarner/homebridge-philips-air-purifier-complete/main/icon.png' width='150' alt='Philips Air Purifier'></p><div style='margin-top:16px;padding:12px 16px;background:#eaf4ff;border-left:4px solid #2f80c9;border-radius:4px;color:#17324d;font-size:14px;'><strong>Manage devices in the tabs below.</strong><br>Add one tab per purifier and choose the matching protocol. Air+ Cloud users can open <strong>Plugin Settings</strong> and click <strong>Login with Air+ (cloud devices)</strong> to create the token file and add the device automatically.</div>",
+  "customUi": true,
+  "headerDisplay": "<p align='center'><img src='https://raw.githubusercontent.com/MaddogWarner/homebridge-philips-air-purifier-complete/main/icon.png' width='150' alt='Philips Air Purifier'></p><div style='margin-top:16px;padding:12px 16px;background:#eaf4ff;border-left:4px solid #2f80c9;border-radius:4px;color:#17324d;font-size:14px;'><strong>Use the Plugin Settings button for the best experience.</strong><br>Click the <strong>Plugin Settings</strong> button (wrench icon or cog on the plugin card) to open the full device manager. You can also add and edit devices in the tabs below.</div>",
   "schema": {
     "type": "object",
     "properties": {

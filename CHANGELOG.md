@@ -6,6 +6,35 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [3.2.1] — 15/06/2026
+
+### Fixed
+
+- Replaced the broken native schema form device editor with a fully custom device manager UI.
+  Config UI X v5.24.0 does not correctly load existing array item values into either `tabarray`
+  or `array` layout types, making the native form unusable for editing saved devices. The new
+  custom UI reads and writes the `devices[]` array directly via `homebridge.getPluginConfig()` /
+  `updatePluginConfig()`, bypassing the schema form entirely.
+- Clicking the "Plugin Config" button now opens the full custom UI (device manager + Air+ OAuth)
+  instead of the broken native tabarray form. Requires `"customUi": true` in `config.schema.json`
+  for Config UI X v5 to route through the custom UI.
+- The "clicking Add Device creates new devices" UX bug is eliminated — the Add Device button is
+  now a clearly labelled `+ Add Device` button at the bottom of the Devices panel.
+- Each device card shows the correct name, protocol, host, and protocol-specific fields (HomeID
+  credentials, Air+ UUID/token) loaded from the saved config.
+
+### Changed
+
+- `config.schema.json` gains `"customUi": true` (needed by Config UI X v5 to route Plugin Config
+  clicks through the custom UI iframe, not the native schema form modal).
+- `homebridge-ui/public/index.html` rewritten as a full device manager: per-device cards with
+  collapsible forms, protocol-aware conditional fields, Add / Remove device support, and the
+  existing Air+ OAuth flow.
+- `headerDisplay` updated to point users to Plugin Settings for the full experience.
+- `eslint.config.js` ignores `test-*.cjs` files (local Playwright test scripts).
+
+---
+
 ## [3.2.0] — 15/06/2026
 
 ### Added

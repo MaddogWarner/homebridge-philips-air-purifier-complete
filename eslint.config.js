@@ -9,6 +9,7 @@ module.exports = [
       'node_modules/**',
       '.claude/**',
       'homebridge-ui/**',
+      'test-*.cjs',
     ],
   },
   js.configs.recommended,
