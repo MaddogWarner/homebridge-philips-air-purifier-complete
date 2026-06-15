@@ -149,6 +149,14 @@ v3.0.0 changes the plugin type from `accessory` to `platform`. Update your Homeb
 
 3. Restart Homebridge.
 
+From v3.2.3, old top-level `"accessory": "PhilipsAirPurifier"` entries are not loaded by
+default. If Homebridge logs `Loading 1 accessories...` followed by
+`Legacy accessories[] config detected`, the old entry is still present in the full Homebridge
+`config.json` even if this plugin's platform settings modal only shows `{ "platform":
+"PhilipsAirPurifier" }`. Remove the old object from the top-level `"accessories"` array and keep
+the device under `"platforms"[]."devices"` instead. For temporary rollback only, set
+`PHILIPS_AIR_ALLOW_LEGACY_ACCESSORY=1` before starting Homebridge.
+
 ### Migration examples
 
 #### CoAP device

@@ -875,14 +875,27 @@ class PhilipsAirPurifierAccessory {
   }
 }
 
-class PhilipsAirPurifierLegacyAccessory extends PhilipsAirPurifierAccessory {
+class PhilipsAirPurifierLegacyAccessory {
   constructor(log, config, api) {
-    log.warn('[PhilipsAir] Legacy accessory config detected. v3 uses a platform config under platforms[].devices[]. See the README migration guide.');
-    super(log, config, api, new LegacyPlatformAccessory(api));
+    this.accessory = null;
+
+    if (process.env.PHILIPS_AIR_ALLOW_LEGACY_ACCESSORY !== '1') {
+      log.error('[PhilipsAir] Legacy accessories[] config detected and will not be loaded. Move this entry into platforms[].devices[] and remove the top-level accessories[] entry. Set PHILIPS_AIR_ALLOW_LEGACY_ACCESSORY=1 only as a temporary rollback.');
+      return;
+    }
+
+    log.warn('[PhilipsAir] Legacy accessories[] config enabled by PHILIPS_AIR_ALLOW_LEGACY_ACCESSORY=1. This compatibility path is deprecated; migrate to platforms[].devices[].');
+    this.accessory = new PhilipsAirPurifierAccessory(log, config, api, new LegacyPlatformAccessory(api));
   }
 
   getServices() {
-    return this.platformAcc.getServices();
+    return this.accessory ? this.accessory.platformAcc.getServices() : [];
+  }
+
+  identify() {
+    if (this.accessory) {
+      this.accessory.identify();
+    }
   }
 }
 

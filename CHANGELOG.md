@@ -6,6 +6,18 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [3.2.3] — 15/06/2026
+
+### Changed
+
+- Legacy top-level `accessories[]` entries are no longer served by default. The compatibility shim
+  now logs a migration error and returns no HomeKit services, which stops old accessory config from
+  keeping duplicate or orphaned purifiers alive after migrating to the v3 platform.
+- Added `PHILIPS_AIR_ALLOW_LEGACY_ACCESSORY=1` as a temporary rollback switch for users who need
+  one more start on the old accessory path while moving config into `platforms[].devices[]`.
+
+---
+
 ## [3.2.2] — 15/06/2026
 
 ### Fixed
