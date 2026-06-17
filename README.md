@@ -351,9 +351,9 @@ Use the Homebridge plugin configuration form to add, edit, or remove CoAP, HTTP,
 Air+ cloud devices. The form presents `devices[]` as one tab per purifier, with protocol-specific
 fields shown only when they apply.
 
-Air+ cloud devices also need an account token. Open **Plugin Settings**, click
-**Login with Air+ (cloud devices)**, complete the Air+ login flow, select the device, then review
-the new Air+ tab in the native form and click **Save**.
+Air+ cloud devices also need an account token. Open **Plugin Settings**, enter the Philips account
+email, complete the verification code flow, select the device, then review the new Air+ card and
+click **Save Changes**.
 
 The **JSON Config** tab remains supported for direct edits to `devices[]`. Existing v3.1
 installations that still contain `additionalDevicesJson` continue to merge those entries at
@@ -397,15 +397,18 @@ If your device shows `Network error: NetworkError` on every command, try setting
 
 1. Install the plugin via the Homebridge UI
 2. Go to **Plugins → Philips Air Purifier → Plugin Settings**
-3. Click **"Login with Air+ (cloud devices)"**
-4. Click **"Open Philips login"** and log in with your Philips account
-5. Your browser shows an error page - **copy the full URL from the address bar**
-6. Paste it into the setup page and click **Continue**
-7. Click **"Add to Form"** next to your device
-8. Review the new Air+ device tab and click **Save**
-9. Restart Homebridge
+3. Enter the email address for your Philips Air+ account
+4. Click **Send Code**
+5. Enter the verification code from the email and click **Verify & List Devices**
+6. Click **Add Device** next to your purifier
+7. Review the new Air+ device card and click **Save Changes**
+8. Restart Homebridge
 
 Each device needs its own setup run. Run through the wizard once per purifier.
+
+The older browser redirect-copy login remains available under
+**Advanced: log in via browser**. Use it only as a fallback; the email verification code flow avoids
+the desktop deep-link mismatch that can produce `invalid_grant` errors.
 
 Deleting an Air+ device from the Homebridge form removes it from the Homebridge config only. The
 token file is intentionally left on disk at `~/.homebridge/philips-airplus-{uuid}.json` so an
@@ -422,8 +425,14 @@ source .venv/bin/activate
 python scripts/airplus_setup.py
 ```
 
-Follow the on-screen instructions. The script saves a token file to
+Follow the on-screen instructions. The script sends an email verification code, saves a token file to
 `~/.homebridge/philips-airplus-{uuid}.json` and prints the Homebridge config to add.
+
+To use the legacy browser redirect-copy fallback instead:
+
+```bash
+python scripts/airplus_setup.py --browser
+```
 
 ---
 

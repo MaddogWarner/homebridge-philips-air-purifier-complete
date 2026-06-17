@@ -6,6 +6,25 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [3.3.0] — 18/06/2026
+
+### Added
+
+- Air+ Cloud login now uses a server-side email + verification code flow by default. This avoids
+  the desktop browser deep-link mismatch where users could only copy a `home.id` web-client code,
+  which SAP CDC rejects as `invalid_grant` when exchanged with the Philips Air app client.
+- The Homebridge custom UI and `scripts/airplus_setup.py` both support the new OTP flow and then
+  reuse the existing device picker/token-file write path.
+
+### Changed
+
+- Kept the browser redirect-copy login as an advanced fallback in the custom UI and behind
+  `python scripts/airplus_setup.py --browser` for CLI users.
+- Added redacted Air+ auth redirect diagnostics when `PHILIPS_AIRPLUS_DEBUG=1` is set, so live
+  handshake issues can be traced without writing authorisation codes or login tickets to logs.
+
+---
+
 ## [3.2.5] — 15/06/2026
 
 ### Fixed

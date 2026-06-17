@@ -200,9 +200,6 @@
       text-align: center;
     }
 
-    .airplus-step { display: none; }
-    .airplus-step.active { display: block; }
-
     .airplus-device-grid { display: grid; gap: 10px; }
 
     .airplus-device-card {
@@ -256,12 +253,42 @@
       <p style="color: var(--muted); font-size: 13px; margin-bottom: 12px;">
         Use this to add devices from a Philips Air+ cloud account. Your purifier must be registered in the Philips Air+ app.
       </p>
-      <div class="toolbar">
-        <button id="airplus-start" type="button">Login with Air+</button>
+
+      <div id="airplus-otp-flow">
+        <div class="field">
+          <label for="airplus-email">Philips account email</label>
+          <input id="airplus-email" type="email" autocomplete="email" placeholder="name@example.com">
+        </div>
+        <div class="toolbar">
+          <button id="airplus-send-code" type="button">Send Code</button>
+        </div>
+        <div id="airplus-code-wrap" hidden>
+          <div class="field">
+            <label for="airplus-code">Verification code</label>
+            <input id="airplus-code" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="6-digit code">
+          </div>
+          <div class="toolbar">
+            <button id="airplus-verify-code" type="button">Verify & List Devices</button>
+            <button class="secondary" type="button" data-airplus-cancel>Cancel</button>
+          </div>
+        </div>
       </div>
 
-      <div id="airplus-flow" hidden>
-        <div id="airplus-step-1" class="airplus-step">
+      <div id="airplus-device-step" hidden>
+        <div id="airplus-device-list" class="airplus-device-grid">
+          <div class="empty-state">Connecting…</div>
+        </div>
+        <div class="toolbar" style="margin-top: 10px;">
+          <button class="secondary" type="button" data-airplus-cancel>Cancel</button>
+        </div>
+      </div>
+
+      <details>
+        <summary>Advanced: log in via browser</summary>
+        <div class="toolbar">
+          <button id="airplus-start" type="button" class="secondary">Open Philips Login</button>
+        </div>
+        <div id="airplus-browser-flow" hidden>
           <ol style="color: var(--muted); font-size: 13px; padding-left: 20px; margin: 0 0 14px; line-height: 1.7;">
             <li><a id="auth-link" href="#" target="_blank" rel="noopener">Open the Philips login page</a> (a new tab will open automatically — click the link if it didn't).</li>
             <li>Log in to your Philips account and approve access when prompted.</li>
@@ -277,16 +304,7 @@
             <button class="secondary" type="button" data-airplus-cancel>Cancel</button>
           </div>
         </div>
-
-        <div id="airplus-step-2" class="airplus-step">
-          <div id="airplus-device-list" class="airplus-device-grid">
-            <div class="empty-state">Connecting…</div>
-          </div>
-          <div class="toolbar" style="margin-top: 10px;">
-            <button class="secondary" type="button" data-airplus-cancel>Cancel</button>
-          </div>
-        </div>
-      </div>
+      </details>
     </div>
 
     <!-- Save -->
@@ -410,7 +428,7 @@
             <div class="section-title">Air+ Cloud</div>
             <div class="field">
               <label>Device UUID</label>
-              <input type="text" data-field="airplusDeviceUuid" value="${uuidVal}" placeholder="Filled automatically by Login with Air+">
+              <input type="text" data-field="airplusDeviceUuid" value="${uuidVal}" placeholder="Filled automatically by Air+ setup">
             </div>
             <div class="field">
               <label>Token File Path</label>
@@ -598,28 +616,74 @@
 
     function setAirplusBusy(v) {
       airplusBusy = v;
-      document.getElementById('airplus-start').disabled   = v;
-      document.getElementById('airplus-continue').disabled = v;
+      document.getElementById('airplus-send-code').disabled   = v;
+      document.getElementById('airplus-verify-code').disabled = v;
+      document.getElementById('airplus-start').disabled       = v;
+      document.getElementById('airplus-continue').disabled    = v;
       document.querySelectorAll('[data-airplus-add]').forEach(b => { b.disabled = v; });
     }
 
-    function setAirplusStep(n) {
-      document.querySelectorAll('.airplus-step').forEach(el => el.classList.remove('active'));
-      document.getElementById('airplus-step-' + n).classList.add('active');
-    }
-
     function closeAirplusFlow(showMsg) {
-      document.getElementById('airplus-flow').hidden = true;
-      document.getElementById('redirect-url').value  = '';
+      document.getElementById('airplus-browser-flow').hidden = true;
+      document.getElementById('airplus-device-step').hidden  = true;
+      document.getElementById('airplus-code-wrap').hidden    = true;
+      document.getElementById('redirect-url').value          = '';
+      document.getElementById('airplus-code').value          = '';
       document.getElementById('airplus-device-list').innerHTML = '<div class="empty-state">Connecting…</div>';
       if (showMsg) showStatus('Air+ setup cancelled.', 'info');
+    }
+
+    function showAirplusDeviceStep() {
+      document.getElementById('airplus-browser-flow').hidden = true;
+      document.getElementById('airplus-device-step').hidden  = false;
+      document.getElementById('airplus-device-list').innerHTML = '<div class="empty-state">Connecting…</div>';
+    }
+
+    async function sendAirplusCode() {
+      const email = document.getElementById('airplus-email').value.trim();
+      if (!email) {
+        showStatus('Enter your Philips account email before sending a code.', 'error');
+        return;
+      }
+
+      hideStatus();
+      closeAirplusFlow(false);
+      setAirplusBusy(true);
+      try {
+        await req('/auth/otp/send', { email });
+        document.getElementById('airplus-code-wrap').hidden = false;
+        document.getElementById('airplus-code').focus();
+        showStatus('Verification code sent. Check your Philips account email.', 'success');
+      } finally {
+        setAirplusBusy(false);
+      }
+    }
+
+    async function verifyAirplusCode() {
+      const code = document.getElementById('airplus-code').value.trim();
+      if (!code) {
+        showStatus('Enter the verification code before continuing.', 'error');
+        return;
+      }
+
+      hideStatus();
+      showAirplusDeviceStep();
+      setAirplusBusy(true);
+      try {
+        const result = await req('/auth/otp/verify', { code });
+        renderAirplusDevices(result.devices || []);
+      } catch (_) {
+        document.getElementById('airplus-device-step').hidden = true;
+      } finally {
+        setAirplusBusy(false);
+      }
     }
 
     async function startAirplusSetup() {
       hideStatus();
       setAirplusBusy(true);
-      document.getElementById('airplus-flow').hidden = false;
-      setAirplusStep(1);
+      document.getElementById('airplus-browser-flow').hidden = false;
+      document.getElementById('airplus-device-step').hidden  = true;
 
       const authWin = window.open('about:blank', '_blank');
       try {
@@ -642,14 +706,14 @@
       }
 
       setAirplusBusy(true);
-      setAirplusStep(2);
-      document.getElementById('airplus-device-list').innerHTML = '<div class="empty-state">Connecting…</div>';
+      showAirplusDeviceStep();
 
       try {
         const result = await req('/auth/exchange', { redirectUrl });
         renderAirplusDevices(result.devices || []);
       } catch (_) {
-        setAirplusStep(1);
+        document.getElementById('airplus-browser-flow').hidden = false;
+        document.getElementById('airplus-device-step').hidden  = true;
       } finally {
         setAirplusBusy(false);
       }
@@ -707,6 +771,8 @@
 
     document.getElementById('save-btn').addEventListener('click', saveConfig);
 
+    document.getElementById('airplus-send-code').addEventListener('click', sendAirplusCode);
+    document.getElementById('airplus-verify-code').addEventListener('click', verifyAirplusCode);
     document.getElementById('airplus-start').addEventListener('click', startAirplusSetup);
     document.getElementById('airplus-continue').addEventListener('click', exchangeAirplusCode);
 
