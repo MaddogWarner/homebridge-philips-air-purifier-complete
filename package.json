@@ -29,7 +29,7 @@
     "url": "https://github.com/MaddogWarner/homebridge-philips-air-purifier-complete/issues"
   },
   "dependencies": {
-    "@homebridge/plugin-ui-utils": "^1.0.0"
+    "@homebridge/plugin-ui-utils": "^2.2.5"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
