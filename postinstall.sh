@@ -6,7 +6,7 @@
 
 PLUGIN_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 VENV_DIR="$PLUGIN_DIR/.venv"
-PYTHON_MIN_VERSION="3.12"
+PYTHON_MIN_VERSION="3.11"
 PYTHON_MIN_MAJOR="${PYTHON_MIN_VERSION%%.*}"
 PYTHON_MIN_MINOR="${PYTHON_MIN_VERSION#*.}"
 
@@ -40,13 +40,17 @@ find_python() {
         "$PYTHON3" \
         python3.13 \
         python3.12 \
+        python3.11 \
         python3 \
         /opt/homebrew/bin/python3.13 \
         /opt/homebrew/bin/python3.12 \
+        /opt/homebrew/bin/python3.11 \
         /usr/local/bin/python3.13 \
         /usr/local/bin/python3.12 \
+        /usr/local/bin/python3.11 \
         /usr/bin/python3.13 \
         /usr/bin/python3.12 \
+        /usr/bin/python3.11 \
         /usr/local/opt/python@3.12/bin/python3.12 \
         /volume1/@appstore/Python3.12/usr/local/bin/python3.12 \
         /volume1/@appstore/py3k/usr/local/bin/python3; do
@@ -67,13 +71,13 @@ warn() {
 echo ""
 echo "homebridge-philips-air-purifier-complete: Setting up Python environment..."
 
-# Check Python 3.12+
+# Check Python 3.11+
 PYTHON_BIN="$(find_python)"
 if [ -z "$PYTHON_BIN" ]; then
     warn "Python $PYTHON_MIN_VERSION or newer not found. Please install Python $PYTHON_MIN_VERSION+ first:"
-    echo "    macOS:   brew install python@3.12"
-    echo "    Ubuntu:  sudo apt install python3.12 python3.12-venv"
-    echo "    Custom:  PHILIPS_AIR_PYTHON=/absolute/path/to/python3.12 npm install -g homebridge-philips-air-purifier-complete"
+    echo "    macOS:   brew install python@3.11"
+    echo "    Ubuntu:  sudo apt install python3 python3-venv"
+    echo "    Custom:  PHILIPS_AIR_PYTHON=/absolute/path/to/python3 npm install -g homebridge-philips-air-purifier-complete"
     echo ""
     exit 0  # Don't fail npm install - homebridge still loads, just won't connect
 fi
@@ -92,7 +96,7 @@ if [ ! -d "$VENV_DIR" ]; then
     "$PYTHON_BIN" -m venv "$VENV_DIR"
     if [ $? -ne 0 ]; then
         warn "Failed to create virtual environment."
-        echo "    On Debian/Ubuntu you may need: sudo apt install python3.12-venv"
+        echo "    On Debian/Ubuntu you may need: sudo apt install python3-venv"
         echo ""
         exit 0
     fi

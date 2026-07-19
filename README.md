@@ -12,7 +12,7 @@
 
 Control your Philips Air Purifier from Apple HomeKit via Homebridge — **with no separate Python package install required**.
 
-This plugin bundles the [aioairctrl](https://github.com/betaboon/aioairctrl) CoAP library directly. Installing the plugin is all you need; the Python environment is set up automatically for Python 3.12 or newer.
+This plugin bundles the [aioairctrl](https://github.com/betaboon/aioairctrl) CoAP library directly. Installing the plugin is all you need; the Python environment is set up automatically for Python 3.11 or newer.
 
 ---
 
@@ -38,17 +38,19 @@ This plugin bundles the [aioairctrl](https://github.com/betaboon/aioairctrl) CoA
 |-------------|---------|
 | [Homebridge](https://homebridge.io) | >= 2.0.0 |
 | Node.js | >= 24.0.0 |
-| Python 3 | >= 3.12 |
+| Python 3 | >= 3.11 |
 | Your Philips Air Purifier's **IP address** | — |
 
-Python 3.12 or newer must be installed on the system running Homebridge. On most platforms:
+Python 3.11 or newer must be installed on the system running Homebridge. The official Homebridge
+Raspberry Pi image and most Debian/Ubuntu systems already ship a suitable Python 3, so usually no
+extra install is needed. On platforms that need it:
 
 ```bash
 # macOS
-brew install python@3.12
+brew install python@3.11
 
-# Raspberry Pi / Ubuntu / Debian
-sudo apt install python3.12 python3.12-venv
+# Raspberry Pi / Ubuntu / Debian (Debian 12 "bookworm" ships Python 3.11)
+sudo apt install python3 python3-venv
 ```
 
 The install hook creates a plugin-local virtual environment and installs:
@@ -71,18 +73,18 @@ The install hook creates a plugin-local virtual environment and installs:
 
 The plugin automatically sets up a Python virtual environment and installs its CoAP dependencies during install. No extra steps needed.
 
-The npm `preinstall` check reports warnings if Node.js 24+ or Python 3.12+ is not available on the host, but it does not block installation. This keeps Homebridge UI plugin installation simple while still making unsupported runtime versions visible in the install log.
+The npm `preinstall` check reports warnings if Node.js 24+ or Python 3.11+ is not available on the host, but it does not block installation. This keeps Homebridge UI plugin installation simple while still making unsupported runtime versions visible in the install log.
 
 For Docker, NAS, or managed Homebridge installs where npm runs with a restricted `PATH`, provide the Python path explicitly:
 
 ```bash
-PHILIPS_AIR_PYTHON=/absolute/path/to/python3.12 npm install -g homebridge-philips-air-purifier-complete
+PHILIPS_AIR_PYTHON=/absolute/path/to/python3 npm install -g homebridge-philips-air-purifier-complete
 ```
 
 The installer also honours npm's Python setting:
 
 ```bash
-npm install -g homebridge-philips-air-purifier-complete --python=/absolute/path/to/python3.12
+npm install -g homebridge-philips-air-purifier-complete --python=/absolute/path/to/python3
 ```
 
 If the install environment cannot expose Python until after the plugin is installed, configure `pythonPath` in Homebridge before starting the plugin. You can also suppress the Python preinstall warning:
@@ -97,7 +99,7 @@ PHILIPS_AIR_SKIP_PYTHON_PREINSTALL=1 npm install -g homebridge-philips-air-purif
 npm install -g homebridge-philips-air-purifier-complete
 ```
 
-If the automatic setup fails (e.g., Python 3.12+ wasn't installed yet), re-run it manually:
+If the automatic setup fails (e.g., Python 3.11+ wasn't installed yet), re-run it manually:
 
 ```bash
 bash $(npm root -g)/homebridge-philips-air-purifier-complete/postinstall.sh
@@ -375,7 +377,7 @@ runtime for backwards compatibility, but that field is no longer shown in the GU
 | `devices[].encryptionKey` | No | Auto-fetched when possible | Optional hex AES key for HomeID encrypted payloads. Leave blank unless you already know it. |
 | `devices[].airplusDeviceUuid` | Yes for Air+ | — | Philips Air+ device UUID. Filled automatically by the setup wizard. |
 | `devices[].airplusTokenFile` | No | `~/.homebridge/philips-airplus-{uuid}.json` | Token file written by the setup wizard or CLI setup script. |
-| `devices[].pythonPath` | No | Auto-detected | Path to Python 3.12 or newer with `aiocoap` and `pycryptodomex` installed. Leave blank to use the plugin's bundled virtual environment. |
+| `devices[].pythonPath` | No | Auto-detected | Path to Python 3.11 or newer with `aiocoap` and `pycryptodomex` installed. Leave blank to use the plugin's bundled virtual environment. |
 | `additionalDevicesJson` | No | — | Legacy v3.1 runtime fallback. Additional entries are still merged with `devices[]`, but this field is no longer shown in the GUI. |
 
 ### Model Compatibility
@@ -409,6 +411,12 @@ Each device needs its own setup run. Run through the wizard once per purifier.
 The older browser redirect-copy login remains available under
 **Advanced: log in via browser**. Use it only as a fallback; the email verification code flow avoids
 the desktop deep-link mismatch that can produce `invalid_grant` errors.
+
+> **Apple Private Relay note:** A `*@privaterelay.appleid.com` address may never
+> receive the verification code (Apple does not forward mail from unregistered
+> senders to Sign-in-with-Apple relay addresses). If **Send Code** appears to
+> work but no email arrives, use your real Philips account email or the
+> **Advanced: log in via browser** fallback. See Troubleshooting.
 
 Deleting an Air+ device from the Homebridge form removes it from the Homebridge config only. The
 token file is intentionally left on disk at `~/.homebridge/philips-airplus-{uuid}.json` so an
@@ -507,19 +515,19 @@ State cache ──► HomeKit characteristics
 The bundled Python script can be used standalone for diagnostics:
 
 ```bash
-python3.12 philips_air_api.py 192.168.1.100 sensors
-python3.12 philips_air_api.py 192.168.1.100 status
-python3.12 philips_air_api.py 192.168.1.100 power on
-python3.12 philips_air_api.py 192.168.1.100 power off
-python3.12 philips_air_api.py 192.168.1.100 mode auto
-python3.12 philips_air_api.py 192.168.1.100 mode sleep
-python3.12 philips_air_api.py 192.168.1.100 mode medium
-python3.12 philips_air_api.py 192.168.1.100 mode turbo
-python3.12 philips_air_api.py 192.168.1.100 light 0      # off
-python3.12 philips_air_api.py 192.168.1.100 light 115    # dim
-python3.12 philips_air_api.py 192.168.1.100 light 123    # bright
-python3.12 philips_air_api.py 192.168.1.100 childlock on
-python3.12 philips_air_api.py 192.168.1.100 childlock off
+python3 philips_air_api.py 192.168.1.100 sensors
+python3 philips_air_api.py 192.168.1.100 status
+python3 philips_air_api.py 192.168.1.100 power on
+python3 philips_air_api.py 192.168.1.100 power off
+python3 philips_air_api.py 192.168.1.100 mode auto
+python3 philips_air_api.py 192.168.1.100 mode sleep
+python3 philips_air_api.py 192.168.1.100 mode medium
+python3 philips_air_api.py 192.168.1.100 mode turbo
+python3 philips_air_api.py 192.168.1.100 light 0      # off
+python3 philips_air_api.py 192.168.1.100 light 115    # dim
+python3 philips_air_api.py 192.168.1.100 light 123    # bright
+python3 philips_air_api.py 192.168.1.100 childlock on
+python3 philips_air_api.py 192.168.1.100 childlock off
 ```
 
 ---
@@ -532,12 +540,12 @@ python3.12 philips_air_api.py 192.168.1.100 childlock off
 - Check Homebridge logs for daemon error messages
 
 **Python setup failed during install**
-- Ensure Python 3.12+ and the matching `venv` package are installed, then re-run `bash postinstall.sh`
+- Ensure Python 3.11+ and the matching `venv` package are installed, then re-run `bash postinstall.sh`
 
 **Preinstall warnings**
 - Warnings about Node.js mean `node --version` did not report v24.0.0 or newer during install
-- Warnings about Python mean `python3.12 --version` or `python3 --version` did not report Python 3.12 or newer during install
-- If Python 3.12+ is installed but not visible to npm, install with `PHILIPS_AIR_PYTHON=/absolute/path/to/python3.12 npm install -g homebridge-philips-air-purifier-complete`
+- Warnings about Python mean `python3 --version` did not report Python 3.11 or newer during install
+- If Python 3.11+ is installed but not visible to npm, install with `PHILIPS_AIR_PYTHON=/absolute/path/to/python3 npm install -g homebridge-philips-air-purifier-complete`
 - If Python can only be configured after install, set `pythonPath` in the Homebridge plugin configuration before starting Homebridge
 
 **Persistent CoAP timeouts**
@@ -547,6 +555,11 @@ python3.12 philips_air_api.py 192.168.1.100 childlock off
 **`Network error: NetworkError` on every command**
 - Your device may use HTTP instead of CoAP. Set `"protocol": "http"` for AC1xxx DH/AES models such as AC1715.
 - If your device responds to HomeID local HTTP endpoints or PhilipsCondor authentication challenges, use `"protocol": "homeid-http"` and configure `clientId` / `clientSecret` if required.
+
+**Air+ verification code email never arrives (Apple Private Relay)**
+- If you use an Apple Private Relay / "Hide My Email" address (`*@privaterelay.appleid.com`), the code email may be silently dropped. Apple only forwards mail to a *Sign in with Apple* relay address from sender domains Philips has registered with Apple; Philips' OTP sender is not guaranteed to be registered, so the email bounces before it reaches you.
+- Workarounds: (a) use the real email address behind your Philips account instead of the relay address; (b) check whether a standalone iCloud+ "Hide My Email" alias (which forwards from any sender) receives the code; or (c) use the **Advanced: log in via browser** fallback flow.
+- This is an Apple/Philips delivery limitation — the plugin passes your email straight to Philips and cannot change how the code is sent.
 
 ---
 

@@ -108,7 +108,7 @@
               "type": "string",
               "required": false,
               "placeholder": "Auto-detected",
-              "description": "Optional path to Python 3.12 or newer. Leave blank to use the bundled virtual environment."
+              "description": "Optional path to Python 3.11 or newer. Leave blank to use the bundled virtual environment."
             },
             "apiScriptPath": {
               "title": "API Script Path",

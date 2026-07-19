@@ -2,7 +2,7 @@
 # preinstall.sh
 # Warns if the host runtime does not meet plugin requirements.
 
-PYTHON_MIN_VERSION="3.12"
+PYTHON_MIN_VERSION="3.11"
 PYTHON_MIN_MAJOR="${PYTHON_MIN_VERSION%%.*}"
 PYTHON_MIN_MINOR="${PYTHON_MIN_VERSION#*.}"
 NODE_MIN_MAJOR=24
@@ -44,13 +44,17 @@ find_python() {
         "$PYTHON3" \
         python3.13 \
         python3.12 \
+        python3.11 \
         python3 \
         /opt/homebrew/bin/python3.13 \
         /opt/homebrew/bin/python3.12 \
+        /opt/homebrew/bin/python3.11 \
         /usr/local/bin/python3.13 \
         /usr/local/bin/python3.12 \
+        /usr/local/bin/python3.11 \
         /usr/bin/python3.13 \
         /usr/bin/python3.12 \
+        /usr/bin/python3.11 \
         /usr/local/opt/python@3.12/bin/python3.12 \
         /volume1/@appstore/Python3.12/usr/local/bin/python3.12 \
         /volume1/@appstore/py3k/usr/local/bin/python3; do
@@ -88,7 +92,7 @@ fi
 PYTHON_BIN="$(find_python)"
 if [ -z "$PYTHON_BIN" ]; then
     warn "Python $PYTHON_MIN_VERSION or newer was not found. npm will continue, but postinstall may not be able to create the Python environment and the plugin will not connect until Python $PYTHON_MIN_VERSION+ is available."
-    echo "  To use a Python binary outside npm's PATH, set PHILIPS_AIR_PYTHON=/absolute/path/to/python3.12."
+    echo "  To use a Python binary outside npm's PATH, set PHILIPS_AIR_PYTHON=/absolute/path/to/python3."
     echo ""
     exit 0
 fi

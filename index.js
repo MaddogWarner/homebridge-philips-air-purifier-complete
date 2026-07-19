@@ -58,7 +58,7 @@ const MODE_TO_SPEED = {
 
 // Restart backoff delays in ms
 const RESTART_DELAYS = [5000, 10000, 30000, 60000];
-const PYTHON_MIN_VERSION = '3.12';
+const PYTHON_MIN_VERSION = '3.11';
 const [PYTHON_MIN_MAJOR, PYTHON_MIN_MINOR] = PYTHON_MIN_VERSION.split('.').map(Number);
 if (!Number.isInteger(PYTHON_MIN_MAJOR) || !Number.isInteger(PYTHON_MIN_MINOR)) {
   throw new Error(`Invalid PYTHON_MIN_VERSION: ${PYTHON_MIN_VERSION}`);
@@ -466,14 +466,18 @@ class PhilipsAirPurifierAccessory {
       '/usr/local/opt/python@3.12/bin/python3.12',
       '/opt/homebrew/bin/python3.12',
       '/opt/homebrew/bin/python3.13',
+      '/opt/homebrew/bin/python3.11',
       '/usr/local/bin/python3.12',
       '/usr/local/bin/python3.13',
+      '/usr/local/bin/python3.11',
       '/usr/bin/python3.12',
       '/usr/bin/python3.13',
+      '/usr/bin/python3.11',
       '/volume1/@appstore/Python3.12/usr/local/bin/python3.12',
       '/volume1/@appstore/py3k/usr/local/bin/python3',
       'python3.13',
       'python3.12',
+      'python3.11',
       '/usr/bin/python3',
       '/usr/local/bin/python3',
       'python3',
