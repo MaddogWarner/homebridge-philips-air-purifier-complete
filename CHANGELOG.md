@@ -6,6 +6,32 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [3.3.1] — 19/07/2026
+
+### Changed
+
+- Lowered the minimum supported Python runtime from 3.12 to **3.11**. Nothing in the plugin or its
+  dependencies (`aiocoap` requires 3.10+, `pycryptodomex` 3.7+, `paho-mqtt` 3.7+) needs 3.12; the
+  previous floor was arbitrary and blocked the official Homebridge base images, which ship Debian 12
+  "bookworm" with Python 3.11 and have no `python3.12` apt package.
+- `PYTHON_MIN_VERSION` (the single source of truth in `index.js`, `preinstall.sh`, and
+  `postinstall.sh`) is now `3.11`. Added explicit `python3.11` candidates to the Python finder in all
+  three places.
+
+### Fixed
+
+- Corrected README and installer guidance for Homebridge base-image users: install steps now use
+  `sudo apt install python3 python3-venv` (already Python 3.11 on bookworm) instead of the
+  non-existent `python3.12` package, and CLI examples use `python3`.
+
+### Documentation
+
+- Documented that Apple Private Relay (`*@privaterelay.appleid.com`) addresses may never receive the
+  Air+ verification code email, with workarounds (real account email, iCloud+ alias, or the browser
+  login fallback).
+
+---
+
 ## [3.3.0] — 18/06/2026
 
 ### Added
