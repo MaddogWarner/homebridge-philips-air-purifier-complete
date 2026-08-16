@@ -98,6 +98,73 @@ MODE_NAMES = {
 
 MODE_VALUES = {v: k for k, v in MODE_NAMES.items()}
 
+AC1715_MODE_NAMES = {
+    0: "auto",
+    1: "medium",
+    2: "fast",
+    17: "sleep",
+    18: "turbo",
+}
+
+
+def _is_ac1715_model(model_id: Optional[str]) -> bool:
+    return str(model_id or "").upper().startswith("AC1715")
+
+
+def _airplus_mode_to_dcode(
+    mode: str,
+    model_id: Optional[str] = None,
+) -> Optional[int]:
+    if _is_ac1715_model(model_id):
+        mapping = {
+            "auto": 0,
+            "medium": 1,
+            "fast": 2,
+            "sleep": 17,
+            "turbo": 18,
+        }
+    else:
+        mapping = {
+            "auto": 1,
+            "sleep": 17,
+            "turbo": 18,
+            "medium": 19,
+        }
+
+    return mapping.get(mode.lower())
+
+
+def _airplus_light_key(model_id: Optional[str] = None) -> str:
+    return "D03105" if _is_ac1715_model(model_id) else PARAM_LIGHT
+
+
+def _airplus_control_message(
+    props: Dict[str, Any],
+    model_id: Optional[str] = None,
+) -> tuple[str, int]:
+    if _is_ac1715_model(model_id):
+        message = {
+            "cid": secrets.token_bytes(4).hex(),
+            "time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "type": "command",
+            "cn": "setPort",
+            "ct": "mobile",
+            "data": {
+                "portName": "Control",
+                "properties": props,
+            },
+        }
+        return json.dumps(message, separators=(",", ":")), 1
+
+    message = {
+        "cn": "setPort",
+        "data": {
+            "portName": "Control",
+            "properties": props,
+        },
+    }
+    return json.dumps(message), 0
+
 _G = 0xA4
 _P = int(
     "FFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD1"
@@ -147,9 +214,23 @@ def _as_number(value: Any, default: Any = None) -> Any:
         return default
 
 
-def _normalise_mode(status: Dict[str, Any]) -> tuple[Any, str]:
-    mode_value = _first_value(status, PARAM_MODE, "mode", default=MODE_AUTO)
+def _normalise_mode(
+    status: Dict[str, Any],
+    model_id: Optional[str] = None,
+) -> tuple[Any, str]:
+    mode_value = _first_value(
+        status,
+        PARAM_MODE,
+        "mode",
+        default=MODE_AUTO,
+    )
+
     if isinstance(mode_value, int):
+        if _is_ac1715_model(model_id):
+            return mode_value, AC1715_MODE_NAMES.get(
+                mode_value,
+                "unknown",
+            )
         return mode_value, MODE_NAMES.get(mode_value, "unknown")
 
     mode_text = str(mode_value).lower()
@@ -161,13 +242,36 @@ def _normalise_mode(status: Dict[str, Any]) -> tuple[Any, str]:
         return mode_value, "sleep"
     if fan_speed in ("t", "turbo", "3"):
         return mode_value, "turbo"
-    if mode_text in ("m", "manual") or fan_speed in ("1", "2", "medium"):
+    if mode_text in ("m", "manual") or fan_speed in (
+        "1",
+        "2",
+        "medium",
+    ):
         return mode_value, "medium"
+
     return mode_value, mode_text or "unknown"
 
 
-def _normalise_light(status: Dict[str, Any]) -> int:
-    light_value = _first_value(status, PARAM_LIGHT, "aqil", default=LIGHT_OFF)
+def _normalise_light(
+    status: Dict[str, Any],
+    model_id: Optional[str] = None,
+) -> int:
+    if _is_ac1715_model(model_id):
+        light_value = _first_value(
+            status,
+            "D03105",
+            PARAM_LIGHT,
+            "aqil",
+            default=LIGHT_OFF,
+        )
+    else:
+        light_value = _first_value(
+            status,
+            PARAM_LIGHT,
+            "aqil",
+            default=LIGHT_OFF,
+        )
+
     if light_value in (LIGHT_OFF, LIGHT_DIM, LIGHT_BRIGHT):
         return int(light_value)
 
@@ -179,7 +283,10 @@ def _normalise_light(status: Dict[str, Any]) -> int:
     return LIGHT_BRIGHT
 
 
-def parse_status(raw: Dict[str, Any]) -> Dict[str, Any]:
+def parse_status(
+    raw: Dict[str, Any],
+    model_id: Optional[str] = None,
+) -> Dict[str, Any]:
     """Parse raw device status into normalised sensor data."""
     # Normalise Air+ MQTT power field: D0310D → D03102 (same semantics)
     if "D0310D" in raw and "D03102" not in raw:
@@ -194,7 +301,7 @@ def parse_status(raw: Dict[str, Any]) -> Dict[str, Any]:
     cleanup_time_until_next = status.get("D0520D", cleanup_max_interval)
     cleanup_percent = (cleanup_time_until_next / cleanup_max_interval * 100) if cleanup_max_interval > 0 else 0
 
-    mode_value, mode_name = _normalise_mode(status)
+    mode_value, mode_name = _normalise_mode(status, model_id)
 
     return {
         "power": _as_bool(_first_value(status, PARAM_POWER, "pwr", default=0)),
@@ -203,7 +310,7 @@ def parse_status(raw: Dict[str, Any]) -> Dict[str, Any]:
         "pm25": _as_number(_first_value(status, "D03221", "pm25")),
         "iaql": _as_number(_first_value(status, "D03120", "iaql")),
         "tvoc": status.get("tvoc"),
-        "light_level": _normalise_light(status),
+        "light_level": _normalise_light(status, model_id),
         "child_lock": _as_bool(_first_value(status, PARAM_CHILD_LOCK, "cl", default=0)),
         "filter_life_percent": round(filter_life_percent, 1),
         "filter_life_hours": filter_remaining,
@@ -537,6 +644,7 @@ class AirPlusCloudClient:
         import threading
         self._state_queue: _queue_module.Queue = _queue_module.Queue()
         self._ready = threading.Event()
+        self._model_id: Optional[str] = None
 
     def _load_tokens(self):
         with open(self._token_file) as f:
@@ -549,6 +657,63 @@ class AirPlusCloudClient:
         os.chmod(tmp, 0o600)
         os.replace(tmp, self._token_file)
         os.chmod(self._token_file, 0o600)
+
+    def _fetch_model_id(self) -> Optional[str]:
+        cached = self._tokens.get("model_id")
+        if cached:
+            return str(cached)
+
+        try:
+            response = self._api_get("/da/user/self/device")
+        except Exception:
+            return None
+
+        if isinstance(response, list):
+            devices = response
+        elif isinstance(response, dict):
+            data = response.get("data")
+            if isinstance(data, dict):
+                data = data.get("items")
+
+            devices = (
+                response.get("devices")
+                or data
+                or response.get("items")
+                or []
+            )
+        else:
+            devices = []
+
+        wanted_uuid = str(self._uuid).removeprefix("da-")
+
+        for device in devices:
+            if not isinstance(device, dict):
+                continue
+
+            device_uuid = (
+                device.get("uuid")
+                or device.get("id")
+                or ""
+            )
+
+            if str(device_uuid).removeprefix("da-") != wanted_uuid:
+                continue
+
+            model_id = (
+                device.get("modelId")
+                or device.get("type")
+                or device.get("deviceType")
+            )
+
+            if model_id:
+                self._tokens["model_id"] = str(model_id)
+                self._save_tokens()
+                return str(model_id)
+
+        return None
+
+    def get_model_id(self) -> Optional[str]:
+        return self._model_id
 
     def _api_get(self, path: str) -> Dict[str, Any]:
         req = urllib.request.Request(
@@ -657,6 +822,7 @@ class AirPlusCloudClient:
         self._ensure_token()
 
         mqtt_user_id = self._fetch_mqtt_user_id()
+        self._model_id = self._fetch_model_id()
 
         # Philips APK format: {userId}_{UUID}
         client_id = f"{mqtt_user_id}_{uuid.uuid4()}"
@@ -790,33 +956,62 @@ class AirPlusCloudClient:
             # success:false, so HomeKit shows the failure instead of a
             # phantom success while the connection is down.
             raise ConnectionError("MQTT not connected")
-        control_topic = f"da_ctrl/{self._device_id}/to_ncp"
-        shadow_topic = f"$aws/things/{self._device_id}/shadow/update"
 
-        _MODE_TO_DCODE = {
-            "auto": 1, "sleep": 17, "turbo": 18, "medium": 19,
-        }
+        control_topic = f"da_ctrl/{self._device_id}/to_ncp"
+        shadow_topic = (
+            f"$aws/things/{self._device_id}/shadow/update"
+        )
 
         props: Dict[str, Any] = {}
+
         for key, val in values.items():
             if key == "power":
-                shadow = json.dumps({"state": {"desired": {"powerOn": bool(val)}}})
-                self._mqtt.publish(shadow_topic, shadow, qos=0)
+                shadow = json.dumps({
+                    "state": {
+                        "desired": {
+                            "powerOn": bool(val),
+                        },
+                    },
+                })
+                self._mqtt.publish(
+                    shadow_topic,
+                    shadow,
+                    qos=0,
+                )
+
             elif key == "mode" and isinstance(val, str):
-                code = _MODE_TO_DCODE.get(val.lower())
+                code = _airplus_mode_to_dcode(
+                    val,
+                    self._model_id,
+                )
                 if code is not None:
                     props["D0310C"] = code
+
             elif key == "light_level":
-                props["D03104"] = int(val)
+                light_key = _airplus_light_key(
+                    self._model_id,
+                )
+
+                if _is_ac1715_model(self._model_id):
+                    props[light_key] = (
+                        100 if int(val) > 0 else 0
+                    )
+                else:
+                    props[light_key] = int(val)
+
             elif key == "child_lock":
                 props["D03103"] = 1 if val else 0
 
         if props:
-            cmd = json.dumps({
-                "cn": "setPort",
-                "data": {"portName": "Control", "properties": props},
-            })
-            self._mqtt.publish(control_topic, cmd, qos=0)
+            command, qos = _airplus_control_message(
+                props,
+                self._model_id,
+            )
+            self._mqtt.publish(
+                control_topic,
+                command,
+                qos=qos,
+            )
 
     def disconnect(self):
         if self._mqtt:
@@ -1461,7 +1656,10 @@ class AirPlusCloudDaemon:
                 break
             try:
                 raw = await asyncio.to_thread(q.get, True, 1.0)
-                state = parse_status(raw)
+                state = parse_status(
+                    raw,
+                    model_id=self._client.get_model_id(),
+                )
                 print(json.dumps({
                     "type": "update",
                     "data": state,
@@ -1552,7 +1750,12 @@ class AirPlusCloudDaemon:
         elif cmd == "mode":
             if args:
                 mode = str(args[0]).lower()
-                if mode not in MODE_VALUES:
+                model_id = (
+                    self._client.get_model_id()
+                    if self._client
+                    else None
+                )
+                if _airplus_mode_to_dcode(mode, model_id) is None:
                     raise ValueError(f"Invalid mode: {mode}")
                 if self._client:
                     await asyncio.to_thread(self._client.set_values, {"mode": mode})

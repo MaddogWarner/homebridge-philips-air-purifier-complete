@@ -1,5 +1,6 @@
 import base64
 import hashlib
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -10,6 +11,9 @@ from philips_air_api import (  # noqa: E402
     CRYPTO_AVAILABLE,
     HomeIDAESCrypto,
     PhilipsCondorAuth,
+    _airplus_control_message,
+    _airplus_light_key,
+    _airplus_mode_to_dcode,
     parse_status,
 )
 
@@ -94,6 +98,73 @@ class AirPlusParsStatusTests(unittest.TestCase):
         # D03102=1 wins; D0310D=0 is ignored
         self.assertTrue(result["power"])
         self.assertEqual(result["mode"], "medium")
+
+
+
+    def test_airplus_ac1715_uses_model_specific_mode_values(self):
+        raw = {
+            "D0310D": 1,
+            "D0310C": 1,
+            "D03105": 100,
+            "D03221": 8,
+        }
+
+        result = parse_status(
+            raw,
+            model_id="AC1715/11",
+        )
+
+        self.assertTrue(result["power"])
+        self.assertEqual(result["mode"], "medium")
+        self.assertEqual(result["pm25"], 8)
+        self.assertEqual(result["light_level"], 123)
+
+        raw["D0310C"] = 2
+        result = parse_status(
+            raw,
+            model_id="AC1715/11",
+        )
+        self.assertEqual(result["mode"], "fast")
+
+    def test_airplus_ac1715_control_profile(self):
+        self.assertEqual(
+            _airplus_mode_to_dcode("auto", "AC1715/11"),
+            0,
+        )
+        self.assertEqual(
+            _airplus_mode_to_dcode("medium", "AC1715/11"),
+            1,
+        )
+        self.assertEqual(
+            _airplus_mode_to_dcode("fast", "AC1715/11"),
+            2,
+        )
+        self.assertEqual(
+            _airplus_mode_to_dcode("auto", "AC0650"),
+            1,
+        )
+        self.assertEqual(
+            _airplus_light_key("AC1715/11"),
+            "D03105",
+        )
+        self.assertEqual(
+            _airplus_light_key("AC0650"),
+            "D03104",
+        )
+
+        command, qos = _airplus_control_message(
+            {"D0310C": 2},
+            "AC1715/11",
+        )
+        payload = json.loads(command)
+
+        self.assertEqual(qos, 1)
+        self.assertEqual(payload["type"], "command")
+        self.assertEqual(payload["ct"], "mobile")
+        self.assertEqual(
+            payload["data"]["properties"]["D0310C"],
+            2,
+        )
 
 
 class HomeIDCryptoTests(unittest.TestCase):
