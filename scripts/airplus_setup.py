@@ -23,6 +23,7 @@ import time
 import urllib.parse
 import urllib.request
 import urllib.error
+import http.cookiejar
 
 
 # OAuth2 / OIDC constants
@@ -44,7 +45,7 @@ AUTHORIZE_ENDPOINT = f"{OIDC_ISSUER}/{TENANT}/authorize"
 CDC_BASE = "https://cdc.accounts.home.id"
 OTP_SEND_ENDPOINT = f"{CDC_BASE}/accounts.auth.otp.email.sendCode"
 OTP_LOGIN_ENDPOINT = f"{CDC_BASE}/accounts.auth.otp.email.login"
-GET_IDS_ENDPOINT = f"{CDC_BASE}/accounts.socialize.getIDs"
+GET_IDS_ENDPOINT = f"{CDC_BASE}/socialize.getIDs"
 
 API_BASE = "https://prod.eu-da.iot.versuni.com/api"
 USER_AGENT = "okhttp/4.12.0 (Android 14; Pixel 7)"
@@ -122,8 +123,16 @@ class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
         return None
 
 
+_COOKIE_JAR = http.cookiejar.CookieJar()
+
+_OPENER = urllib.request.build_opener(
+    urllib.request.HTTPCookieProcessor(_COOKIE_JAR),
+    _NoRedirectHandler(),
+)
+
+
 def _open_no_redirect(req: urllib.request.Request) -> tuple[int, dict, bytes]:
-    opener = urllib.request.build_opener(_NoRedirectHandler)
+    opener = _OPENER
     try:
         with opener.open(req, timeout=15) as r:
             return r.status, dict(r.headers), r.read()
@@ -263,7 +272,7 @@ def _get_gmid_ticket() -> str:
     return gmid_ticket
 
 
-def _save_tokens(uuid: str, access_token: str, refresh_token: str, expires_at: float) -> str:
+def _save_tokens(uuid: str, access_token: str, refresh_token: str, id_token: str, expires_at: float) -> str:
     """Save token file to ~/.homebridge/philips-airplus-{uuid}.json with 0o600 permissions."""
     homebridge_dir = os.path.join(os.path.expanduser("~"), ".homebridge")
     os.makedirs(homebridge_dir, exist_ok=True)
@@ -271,6 +280,7 @@ def _save_tokens(uuid: str, access_token: str, refresh_token: str, expires_at: f
     payload = {
         "access_token": access_token,
         "refresh_token": refresh_token,
+        "id_token": id_token,
         "client_id": CLIENT_ID,
         "expires_at": expires_at,
     }
@@ -401,6 +411,7 @@ def _devices_from_response(devices_resp) -> list:
 def _save_selected_device(token_resp: dict) -> int:
     access_token = token_resp.get("access_token")
     refresh_token = token_resp.get("refresh_token")
+    id_token = token_resp.get("id_token", "")
     expires_in = token_resp.get("expires_in", 3600)
     expires_at = time.time() + expires_in
 
@@ -451,7 +462,7 @@ def _save_selected_device(token_resp: dict) -> int:
     uuid = uuid.strip()
 
     # Step 8: Save tokens
-    token_path = _save_tokens(uuid, access_token, refresh_token or "", expires_at)
+    token_path = _save_tokens(uuid, access_token, refresh_token or "", id_token, expires_at)
     print(f"\nTokens saved to: {token_path}")
     print("File permissions set to 0600 (owner read/write only).")
 
