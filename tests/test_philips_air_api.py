@@ -185,6 +185,29 @@ class AirPlusModelIdRecoveryTests(unittest.TestCase):
         self.assertEqual(client.ensure_model_id(), "AC1715/11")
         self.assertEqual(client.get_model_id(), "AC1715/11")
 
+    def test_fetch_model_id_reads_ctn_field(self):
+        # Real /da/user/self/device response (observed 2026-08-22): a bare
+        # list of devices whose only model field is "ctn" (commercial type
+        # number, e.g. "AC1715/11") — no modelId/type/deviceType keys.
+        client = AirPlusCloudClient.__new__(AirPlusCloudClient)
+        client._uuid = "00000000-0000-4000-8000-000000000000"
+        client._tokens = {}
+        client._api_get = lambda path: [
+            {
+                "id": "00000000-0000-4000-8000-000000000000",
+                "ctn": "AC1715/11",
+                "friendlyName": "Bedroom",
+                "isOwner": True,
+                "macAddress": "aa:bb:cc:dd:ee:ff",
+                "role": "owner",
+                "thingName": "da-00000000-0000-4000-8000-000000000000",
+            }
+        ]
+        client._save_tokens = lambda: None
+
+        self.assertEqual(client._fetch_model_id(), "AC1715/11")
+        self.assertEqual(client._tokens["model_id"], "AC1715/11")
+
     def test_mode_command_recovers_model_id_before_validation(self):
         daemon = AirPlusCloudDaemon("uuid-1", "/nonexistent-token-file")
         set_calls = []

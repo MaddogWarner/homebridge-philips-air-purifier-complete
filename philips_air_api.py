@@ -699,8 +699,11 @@ class AirPlusCloudClient:
             if str(device_uuid).removeprefix("da-") != wanted_uuid:
                 continue
 
+            # "ctn" (commercial type number, e.g. "AC1715/11") is what the
+            # live API actually returns; the others are kept as fallbacks.
             model_id = (
-                device.get("modelId")
+                device.get("ctn")
+                or device.get("modelId")
                 or device.get("type")
                 or device.get("deviceType")
             )
