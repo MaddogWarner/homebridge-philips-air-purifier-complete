@@ -1,6 +1,10 @@
+import asyncio
 import base64
+import contextlib
 import hashlib
+import io
 import json
+import queue
 import sys
 import unittest
 from pathlib import Path
@@ -8,6 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from philips_air_api import (  # noqa: E402
+    AirPlusCloudDaemon,
     CRYPTO_AVAILABLE,
     HomeIDAESCrypto,
     PhilipsCondorAuth,
@@ -165,6 +170,87 @@ class AirPlusParsStatusTests(unittest.TestCase):
             payload["data"]["properties"]["D0310C"],
             2,
         )
+
+
+class AirPlusCloudDaemonMessageTests(unittest.TestCase):
+    def test_cloud_daemon_update_includes_model_id(self):
+        daemon = AirPlusCloudDaemon("uuid-1", "/nonexistent-token-file")
+        raw = {"D0310D": 1, "D0310C": 1, "D03105": 100, "D03221": 8}
+
+        class _StubQueue:
+            def __init__(self):
+                self._served = False
+
+            def get(self, block=True, timeout=None):
+                if self._served:
+                    daemon.shutdown()
+                    raise queue.Empty
+                self._served = True
+                return raw
+
+        class _StubClient:
+            def __init__(self):
+                self._queue = _StubQueue()
+
+            def get_status_queue(self):
+                return self._queue
+
+            def get_model_id(self):
+                return "AC1715/11"
+
+        daemon._client = _StubClient()
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            asyncio.run(daemon._state_loop())
+
+        messages = [json.loads(line) for line in buf.getvalue().splitlines()]
+        updates = [m for m in messages if m["type"] == "update"]
+        self.assertEqual(len(updates), 1)
+        self.assertEqual(updates[0]["model_id"], "AC1715/11")
+        self.assertEqual(updates[0]["data"]["mode"], "medium")
+
+    def test_cloud_daemon_ready_includes_model_id(self):
+        import philips_air_api as api
+
+        class _StubClient:
+            def __init__(self, uuid, token_file):
+                pass
+
+            def connect(self):
+                pass
+
+            def disconnect(self):
+                pass
+
+            def get_status_queue(self):
+                return queue.Queue()
+
+            def get_model_id(self):
+                return "AC1715/11"
+
+        daemon = AirPlusCloudDaemon("uuid-1", "/nonexistent-token-file")
+        daemon.shutdown()
+
+        async def _no_commands():
+            pass
+
+        daemon._process_commands = _no_commands
+
+        original = api.AirPlusCloudClient
+        api.AirPlusCloudClient = _StubClient
+        try:
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                asyncio.run(daemon.start())
+        finally:
+            api.AirPlusCloudClient = original
+
+        messages = [json.loads(line) for line in buf.getvalue().splitlines()]
+        ready = [m for m in messages if m["type"] == "ready"]
+        self.assertEqual(len(ready), 1)
+        self.assertTrue(ready[0]["connected"])
+        self.assertEqual(ready[0]["model_id"], "AC1715/11")
 
 
 class HomeIDCryptoTests(unittest.TestCase):
