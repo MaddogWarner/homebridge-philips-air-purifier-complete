@@ -767,7 +767,8 @@ class PhilipsAirPurifierAccessory {
 
     const rotationSpeed = this.purifierService.getCharacteristic(Characteristic.RotationSpeed);
     if (ac1715) {
-      // 33 = Medium, 67 = Fast, 100 = Turbo on the Home app slider.
+      // Slider buckets: ≤50 → Medium, 51–99 → Fast, 100 → Turbo; reads
+      // snap to 50/75/100 (AC1715_MODE_TO_SPEED).
       rotationSpeed.setProps({
         minValue: 0,
         maxValue: 100,
@@ -781,37 +782,54 @@ class PhilipsAirPurifierAccessory {
       this.log.info(`[DEBUG] RotationSpeed props: ${JSON.stringify(rotationSpeed.props)}`);
 
       const applyFanSpeed = async (speed) => {
-        if (speed === 0) {
-          this.log.info('[SET] RotationSpeed: 0% -> POWER OFF');
-          await this.executeCommand('power', ['off'], { power: false });
+        // The debounce means a failure can't propagate to HomeKit as a
+        // write error, so roll back the optimistic state on failure and
+        // resync the characteristics — the slider snaps back instead of
+        // showing a speed the device never reached.
+        const prior = {
+          power: this.state.power,
+          mode: this.state.mode,
+          lastManualMode: this.lastManualMode,
+          lastNonSleepMode: this.lastNonSleepMode,
+        };
+        try {
+          if (speed === 0) {
+            this.log.info('[SET] RotationSpeed: 0% -> POWER OFF');
+            await this.executeCommand('power', ['off'], { power: false });
+            return;
+          }
+
+          const mode =
+            speed <= 50 ? 'medium' :
+            speed < 100 ? 'fast' :
+            'turbo';
+
+          // Dedupe: device already in this mode -> nothing to send.
+          if (this.state.power && this.state.mode === mode) {
+            this.log.debug(`[SET] RotationSpeed: ${speed}% -> ${mode} (no change, skipped)`);
+            return;
+          }
+
+          this.log.info(`[SET] RotationSpeed: ${speed}% -> ${mode.toUpperCase()}`);
+          if (!this.state.power) await this.executeCommand('power', ['on'], { power: true });
+          this.lastManualMode = mode;
+          this.lastNonSleepMode = mode;
+          await this.executeCommand('mode', [mode], { mode });
+        } catch (err) {
+          this.state.power = prior.power;
+          this.state.mode = prior.mode;
+          this.lastManualMode = prior.lastManualMode;
+          this.lastNonSleepMode = prior.lastNonSleepMode;
+          throw err;
+        } finally {
           this.updatePurifierCharacteristics();
-          return;
+          this.updateSleepCharacteristics();
         }
-
-        const mode =
-          speed <= 50 ? 'medium' :
-          speed < 100 ? 'fast' :
-          'turbo';
-
-        // Dedupe: device already in this mode -> nothing to send.
-        if (this.state.power && this.state.mode === mode) {
-          this.log.debug(`[SET] RotationSpeed: ${speed}% -> ${mode} (no change, skipped)`);
-          this.updatePurifierCharacteristics();
-          return;
-        }
-
-        this.log.info(`[SET] RotationSpeed: ${speed}% -> ${mode.toUpperCase()}`);
-        if (!this.state.power) await this.executeCommand('power', ['on'], { power: true });
-        this.lastManualMode = mode;
-        this.lastNonSleepMode = mode;
-        await this.executeCommand('mode', [mode], { mode });
-        this.updatePurifierCharacteristics();
-        this.updateSleepCharacteristics();
       };
 
       rotationSpeed
         .onGet(() => this.state.power
-          ? (AC1715_MODE_TO_SPEED[this.lastManualMode] ?? 33)
+          ? (AC1715_MODE_TO_SPEED[this.lastManualMode] ?? 50)
           : 0)
         .onSet((value) => {
           // Debounce: the Home app streams writes while the slider is
@@ -1007,7 +1025,7 @@ class PhilipsAirPurifierAccessory {
     this.purifierService.updateCharacteristic(
       Characteristic.RotationSpeed,
       this.isAC1715()
-        ? (this.state.power ? (AC1715_MODE_TO_SPEED[this.lastManualMode] ?? 33) : 0)
+        ? (this.state.power ? (AC1715_MODE_TO_SPEED[this.lastManualMode] ?? 50) : 0)
         : (MODE_TO_SPEED[this.state.mode] ?? 100)
     );
     this.purifierService.updateCharacteristic(

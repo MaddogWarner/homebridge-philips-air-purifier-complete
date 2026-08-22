@@ -715,6 +715,19 @@ class AirPlusCloudClient:
     def get_model_id(self) -> Optional[str]:
         return self._model_id
 
+    def ensure_model_id(self) -> Optional[str]:
+        """Return the model id, retrying the fetch if it is still unknown.
+
+        connect() fetches the model id once; if that attempt failed (e.g.
+        a transient API error) the model stays None for the whole session
+        and model-specific commands would silently take the wrong path.
+        Commands call this so an AC1715 recovers its mapping as soon as
+        the API is reachable again.
+        """
+        if self._model_id is None:
+            self._model_id = self._fetch_model_id()
+        return self._model_id
+
     def _api_get(self, path: str) -> Dict[str, Any]:
         req = urllib.request.Request(
             f"{_AIRPLUS_API_BASE}{path}",
@@ -956,6 +969,10 @@ class AirPlusCloudClient:
             # success:false, so HomeKit shows the failure instead of a
             # phantom success while the connection is down.
             raise ConnectionError("MQTT not connected")
+
+        # mode dcodes, the light property key, and the control envelope all
+        # depend on the model — recover it if connect()'s fetch failed.
+        self.ensure_model_id()
 
         control_topic = f"da_ctrl/{self._device_id}/to_ncp"
         shadow_topic = (
@@ -1753,7 +1770,7 @@ class AirPlusCloudDaemon:
             if args:
                 mode = str(args[0]).lower()
                 model_id = (
-                    self._client.get_model_id()
+                    self._client.ensure_model_id()
                     if self._client
                     else None
                 )

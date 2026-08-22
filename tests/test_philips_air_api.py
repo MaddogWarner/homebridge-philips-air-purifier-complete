@@ -12,6 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from philips_air_api import (  # noqa: E402
+    AirPlusCloudClient,
     AirPlusCloudDaemon,
     CRYPTO_AVAILABLE,
     HomeIDAESCrypto,
@@ -170,6 +171,40 @@ class AirPlusParsStatusTests(unittest.TestCase):
             payload["data"]["properties"]["D0310C"],
             2,
         )
+
+
+class AirPlusModelIdRecoveryTests(unittest.TestCase):
+    def test_ensure_model_id_retries_fetch_when_unknown(self):
+        # Bypass __init__: it requires paho-mqtt, which ensure_model_id
+        # does not need.
+        client = AirPlusCloudClient.__new__(AirPlusCloudClient)
+        client._model_id = None
+        client._tokens = {"model_id": "AC1715/11"}
+
+        self.assertIsNone(client.get_model_id())
+        self.assertEqual(client.ensure_model_id(), "AC1715/11")
+        self.assertEqual(client.get_model_id(), "AC1715/11")
+
+    def test_mode_command_recovers_model_id_before_validation(self):
+        daemon = AirPlusCloudDaemon("uuid-1", "/nonexistent-token-file")
+        set_calls = []
+
+        class _StubClient:
+            def get_model_id(self):
+                return None
+
+            def ensure_model_id(self):
+                return "AC1715/11"
+
+            def set_values(self, values):
+                set_calls.append(values)
+
+        daemon._client = _StubClient()
+
+        result = asyncio.run(daemon._execute_command("mode", ["fast"]))
+
+        self.assertEqual(result, {"mode": "fast"})
+        self.assertEqual(set_calls, [{"mode": "fast"}])
 
 
 class AirPlusCloudDaemonMessageTests(unittest.TestCase):
