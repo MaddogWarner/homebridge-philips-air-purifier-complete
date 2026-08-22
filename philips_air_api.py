@@ -645,7 +645,6 @@ class AirPlusCloudClient:
         self._load_tokens()
         self._ensure_token()
 
-        signature = self._fetch_signature()
         mqtt_user_id = self._fetch_mqtt_user_id()
 
         # Philips APK format: {userId}_{UUID}
@@ -658,18 +657,34 @@ class AirPlusCloudClient:
 
         client.tls_set_context(ssl.create_default_context())
 
-        auth_headers = {
-            "x-amz-customauthorizer-name": "CustomAuthorizer",
-            "x-amz-customauthorizer-signature": signature,
-            "tenant": "da",
-            "token-header": f"Bearer {self._tokens['access_token']}",
-            "content-type": "application/json",
-        }
-
         def _apply_ws_headers(default_headers):
+            # Runs on every WebSocket handshake, including Paho's
+            # automatic reconnects.  Tokens expire hourly and AWS IoT
+            # drops the connection when they do, so each handshake must
+            # carry a currently-valid access token and a fresh
+            # signature — a snapshot taken at connect() time would make
+            # every reconnect attempt fail with a stale token.
+            try:
+                self._ensure_token()
+                signature = self._fetch_signature()
+            except Exception as e:
+                print(json.dumps({
+                    "type": "log",
+                    "event": "mqtt_auth_error",
+                    "message": f"Failed to refresh MQTT credentials: {e}",
+                }), flush=True)
+                # Paho's reconnect loop only survives OSError; anything
+                # else would kill the network thread and end reconnects.
+                raise ConnectionError(f"MQTT credential refresh failed: {e}") from e
             # Match Philips app: don't send Paho's default Origin header.
             default_headers.pop("Origin", None)
-            default_headers.update(auth_headers)
+            default_headers.update({
+                "x-amz-customauthorizer-name": "CustomAuthorizer",
+                "x-amz-customauthorizer-signature": signature,
+                "tenant": "da",
+                "token-header": f"Bearer {self._tokens['access_token']}",
+                "content-type": "application/json",
+            })
             return default_headers
 
         client.ws_set_options(
@@ -742,13 +757,22 @@ class AirPlusCloudClient:
 
     def _on_disconnect(self, client, userdata, rc, properties=None):
         self._connected = False
+        print(json.dumps({
+            "type": "log",
+            "event": "mqtt_disconnect",
+            "message": f"MQTT disconnected (rc={rc}); Paho will reconnect "
+                       "with refreshed credentials",
+        }), flush=True)
 
     def get_status_queue(self):
         return self._state_queue
 
     def set_values(self, values: Dict[str, Any]):
         if not self._mqtt or not self._connected:
-            return
+            # Raising (rather than returning) lets the daemon report
+            # success:false, so HomeKit shows the failure instead of a
+            # phantom success while the connection is down.
+            raise ConnectionError("MQTT not connected")
         control_topic = f"da_ctrl/{self._device_id}/to_ncp"
         shadow_topic = f"$aws/things/{self._device_id}/shadow/update"
 
@@ -1396,10 +1420,28 @@ class AirPlusCloudDaemon:
             await asyncio.to_thread(self._client.disconnect)
         print(json.dumps({"type": "shutdown"}), flush=True)
 
+    # If MQTT stays down this long, reconnecting with refreshed
+    # credentials has failed (e.g. revoked refresh token) — exit so the
+    # plugin's daemon-restart logic can rebuild everything from scratch.
+    _DISCONNECT_EXIT_SECONDS = 300
+
     async def _state_loop(self):
         import queue as _queue_module
         q = self._client.get_status_queue()
+        disconnected_since = None
         while not self._shutdown_event.is_set():
+            if self._client._connected:
+                disconnected_since = None
+            elif disconnected_since is None:
+                disconnected_since = time.time()
+            elif time.time() - disconnected_since > self._DISCONNECT_EXIT_SECONDS:
+                self._log(
+                    "mqtt_dead",
+                    f"MQTT down for over {self._DISCONNECT_EXIT_SECONDS}s "
+                    "and not recovering; exiting for daemon restart",
+                )
+                self._shutdown_event.set()
+                break
             try:
                 raw = await asyncio.to_thread(q.get, True, 1.0)
                 state = parse_status(raw)
