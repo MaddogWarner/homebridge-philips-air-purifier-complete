@@ -779,7 +779,7 @@ class PhilipsAirPurifierAccessory {
         validValueRanges: null,
       });
 
-      this.log.info(`[DEBUG] RotationSpeed props: ${JSON.stringify(rotationSpeed.props)}`);
+      this.log.debug(`RotationSpeed props: ${JSON.stringify(rotationSpeed.props)}`);
 
       const applyFanSpeed = async (speed) => {
         // The debounce means a failure can't propagate to HomeKit as a
