@@ -16,7 +16,7 @@ jobs:
         with:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.11'
       - run: npm install -g npm@latest  # Trusted publishing requires npm >= 11.5.1
