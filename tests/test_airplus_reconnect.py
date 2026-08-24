@@ -14,11 +14,15 @@ loudly instead of pretending to succeed.
 """
 
 import json
+import io
 import sys
 import types
 import unittest
+import urllib.error
+from contextlib import redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -138,6 +142,20 @@ class FakePahoModule(types.SimpleNamespace):
     Client = FakePahoClient
 
 
+class FakeHTTPResponse:
+    def __init__(self, payload):
+        self.payload = json.dumps(payload).encode()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        return False
+
+    def read(self):
+        return self.payload
+
+
 class AirPlusReconnectTests(unittest.TestCase):
     def setUp(self):
         self.clock = FakeClock()
@@ -220,6 +238,149 @@ class AirPlusReconnectTests(unittest.TestCase):
         client._connected = False
         with self.assertRaises(ConnectionError):
             client.set_values({"mode": "auto"})
+
+    def test_get_id_401_refreshes_tokens_and_retries_once(self):
+        client = AirPlusCloudClient("da-test-uuid", self.token_file)
+        client._tokens = {
+            "access_token": "tok-1",
+            "refresh_token": "refresh-1",
+            "id_token": "idt-1",
+            "expires_at": self.clock.now + TOKEN_LIFETIME,
+        }
+        requests = []
+
+        def fake_urlopen(request, timeout):
+            requests.append(request)
+            if len(requests) == 1:
+                raise urllib.error.HTTPError(
+                    request.full_url,
+                    401,
+                    "Unauthorised",
+                    {},
+                    io.BytesIO(b'{"access_token":"must-not-reach-logs"}'),
+                )
+            if len(requests) == 2:
+                return FakeHTTPResponse({
+                    "access_token": "tok-2",
+                    "refresh_token": "refresh-2",
+                    "id_token": "idt-2",
+                    "expires_in": TOKEN_LIFETIME,
+                })
+            return FakeHTTPResponse({"userId": "user-refreshed"})
+
+        AirPlusCloudClient._refresh_token = self._orig["refresh"]
+        with mock.patch.object(philips_air_api.urllib.request, "urlopen", fake_urlopen):
+            user_id = client._fetch_mqtt_user_id()
+
+        self.assertEqual(user_id, "user-refreshed")
+        self.assertEqual(len(requests), 3)
+        first_get_id = json.loads(requests[0].data)
+        retried_get_id = json.loads(requests[2].data)
+        self.assertEqual(first_get_id["idToken"], "idt-1")
+        self.assertEqual(retried_get_id["idToken"], "idt-2")
+        self.assertEqual(requests[2].get_header("Authorization"), "Bearer tok-2")
+
+        saved_tokens = json.loads(Path(self.token_file).read_text())
+        self.assertEqual(saved_tokens["id_token"], "idt-2")
+        self.assertEqual(saved_tokens["mqtt_user_id"], "user-refreshed")
+
+    def test_get_id_401_without_refreshed_id_token_requires_setup(self):
+        client = AirPlusCloudClient("da-test-uuid", self.token_file)
+        client._tokens = {
+            "access_token": "tok-1",
+            "refresh_token": "refresh-1",
+            "id_token": "idt-1",
+            "expires_at": self.clock.now + TOKEN_LIFETIME,
+        }
+        requests = []
+
+        def fake_urlopen(request, timeout):
+            requests.append(request)
+            if len(requests) == 1:
+                raise urllib.error.HTTPError(
+                    request.full_url,
+                    401,
+                    "Unauthorised",
+                    {},
+                    io.BytesIO(b'{"error":"expired id_token"}'),
+                )
+            if len(requests) == 2:
+                return FakeHTTPResponse({
+                    "access_token": "tok-2",
+                    "refresh_token": "refresh-2",
+                    "expires_in": TOKEN_LIFETIME,
+                })
+            self.fail("get-id was retried with an unchanged id_token")
+
+        AirPlusCloudClient._refresh_token = self._orig["refresh"]
+        with mock.patch.object(philips_air_api.urllib.request, "urlopen", fake_urlopen):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "rerun scripts/airplus_setup.py",
+            ):
+                client._fetch_mqtt_user_id()
+
+        get_id_requests = [
+            request for request in requests if request.full_url.endswith("/da/user/self/get-id")
+        ]
+        self.assertEqual(len(get_id_requests), 1)
+        self.assertEqual(client._tokens["id_token"], "idt-1")
+
+    def test_get_id_error_omits_upstream_response_body(self):
+        client = AirPlusCloudClient("da-test-uuid", self.token_file)
+        client._tokens = {
+            "access_token": "tok-1",
+            "refresh_token": "refresh-1",
+            "id_token": "idt-1",
+        }
+        secret_body = b'{"id_token":"must-not-reach-logs"}'
+        error = urllib.error.HTTPError(
+            "https://example.invalid/get-id",
+            500,
+            "Internal Server Error",
+            {},
+            io.BytesIO(secret_body),
+        )
+
+        with mock.patch.object(
+            philips_air_api.urllib.request,
+            "urlopen",
+            side_effect=error,
+        ):
+            with self.assertRaisesRegex(ConnectionError, "HTTP 500") as caught:
+                client._fetch_mqtt_user_id()
+
+        self.assertNotIn("must-not-reach-logs", str(caught.exception))
+
+    def test_mqtt_auth_error_keeps_safe_diagnostics_and_omits_body(self):
+        secret = "must-not-reach-logs"
+        error = urllib.error.HTTPError(
+            "https://example.invalid/signature",
+            503,
+            "Service Unavailable",
+            {},
+            io.BytesIO(f'{{"access_token":"{secret}"}}'.encode()),
+        )
+
+        def fail_signature(_client):
+            raise error
+
+        AirPlusCloudClient._fetch_signature = fail_signature
+        client = AirPlusCloudClient("da-test-uuid", self.token_file)
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            with self.assertRaises(ConnectionError) as caught:
+                client.connect()
+
+        self.assertNotIn(secret, output.getvalue())
+        self.assertNotIn(secret, str(caught.exception))
+        self.assertIn("HTTPError", output.getvalue())
+        self.assertIn("HTTP 503", output.getvalue())
+        self.assertIn("HTTPError", str(caught.exception))
+        self.assertIn("HTTP 503", str(caught.exception))
+        self.assertIn("upstream response omitted", output.getvalue())
+        error.close()
 
 
 if __name__ == "__main__":

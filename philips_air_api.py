@@ -584,6 +584,8 @@ class AirPlusCloudClient:
         self._tokens["access_token"] = resp["access_token"]
         if "refresh_token" in resp:
             self._tokens["refresh_token"] = resp["refresh_token"]
+        if resp.get("id_token"):
+            self._tokens["id_token"] = resp["id_token"]
         self._tokens["expires_at"] = time.time() + resp.get("expires_in", 3600)
         self._save_tokens()
 
@@ -604,38 +606,47 @@ class AirPlusCloudClient:
         if cached:
             return cached
 
-        id_token = self._tokens.get("id_token")
-        if not id_token:
-            raise RuntimeError(
-                "Token file has no id_token; rerun scripts/airplus_setup.py"
+        for attempt in range(2):
+            id_token = self._tokens.get("id_token")
+            if not id_token:
+                raise RuntimeError(
+                    "Token file has no id_token; rerun scripts/airplus_setup.py"
+                )
+
+            req = urllib.request.Request(
+                f"{_AIRPLUS_API_BASE}/da/user/self/get-id",
+                data=json.dumps({"idToken": id_token}).encode(),
+                headers={
+                    "Authorization": f"Bearer {self._tokens['access_token']}",
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                    "User-Agent": _AIRPLUS_USER_AGENT,
+                },
+                method="POST",
             )
 
-        req = urllib.request.Request(
-            f"{_AIRPLUS_API_BASE}/da/user/self/get-id",
-            data=json.dumps({"idToken": id_token}).encode(),
-            headers={
-                "Authorization": f"Bearer {self._tokens['access_token']}",
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-                "User-Agent": _AIRPLUS_USER_AGENT,
-            },
-            method="POST",
-        )
-
-        try:
-            with urllib.request.urlopen(req, timeout=10) as r:
-                result = json.loads(r.read())
-        except urllib.error.HTTPError as e:
-            body = e.read().decode(errors="replace")
-            raise ConnectionError(
-                f"MQTT get-id failed: HTTP {e.code}: {body[:300]}"
-            ) from e
+            try:
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    result = json.loads(r.read())
+                break
+            except urllib.error.HTTPError as e:
+                e.close()
+                if e.code == 401 and attempt == 0:
+                    previous_id_token = id_token
+                    self._refresh_token()
+                    if self._tokens.get("id_token") == previous_id_token:
+                        raise RuntimeError(
+                            "Air+ id_token is expired and was not renewed on refresh; "
+                            "rerun scripts/airplus_setup.py"
+                        ) from e
+                    continue
+                raise ConnectionError(
+                    f"MQTT get-id failed: HTTP {e.code}; upstream response omitted"
+                ) from e
 
         user_id = result.get("userId")
         if not user_id:
-            raise RuntimeError(
-                f"MQTT get-id returned no userId: {result}"
-            )
+            raise RuntimeError("MQTT get-id returned no userId")
 
         self._tokens["mqtt_user_id"] = user_id
         self._save_tokens()
@@ -668,14 +679,20 @@ class AirPlusCloudClient:
                 self._ensure_token()
                 signature = self._fetch_signature()
             except Exception as e:
+                error_detail = type(e).__name__
+                if isinstance(e, urllib.error.HTTPError):
+                    error_detail += f" (HTTP {e.code})"
                 print(json.dumps({
                     "type": "log",
                     "event": "mqtt_auth_error",
-                    "message": f"Failed to refresh MQTT credentials: {e}",
+                    "message": f"Failed to refresh MQTT credentials: {error_detail}; "
+                               "upstream response omitted",
                 }), flush=True)
                 # Paho's reconnect loop only survives OSError; anything
                 # else would kill the network thread and end reconnects.
-                raise ConnectionError(f"MQTT credential refresh failed: {e}") from e
+                raise ConnectionError(
+                    f"MQTT credential refresh failed: {error_detail}"
+                ) from e
             # Match Philips app: don't send Paho's default Origin header.
             default_headers.pop("Origin", None)
             default_headers.update({

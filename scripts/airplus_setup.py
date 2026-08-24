@@ -411,12 +411,18 @@ def _devices_from_response(devices_resp) -> list:
 def _save_selected_device(token_resp: dict) -> int:
     access_token = token_resp.get("access_token")
     refresh_token = token_resp.get("refresh_token")
-    id_token = token_resp.get("id_token", "")
+    id_token = token_resp.get("id_token")
     expires_in = token_resp.get("expires_in", 3600)
     expires_at = time.time() + expires_in
 
     if not access_token:
         print("ERROR: No access_token in token response.", file=sys.stderr)
+        return 1
+    if not isinstance(id_token, str) or not id_token.strip():
+        print(
+            "ERROR: No id_token in token response; Air+ MQTT setup cannot continue.",
+            file=sys.stderr,
+        )
         return 1
 
     print("Token acquired successfully.")
