@@ -6,6 +6,22 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [4.0.2] — 25/08/2026
+
+### Fixed
+
+- **Air+ Cloud:** the daemon now stops when Homebridge stops it. Its SIGINT/SIGTERM handlers were
+  registered on one event loop and the daemon was then run on another, so the signal was never
+  delivered — but installing the handlers had already replaced the process default, so the signal
+  was swallowed instead of terminating the process. Every restart left the previous daemon alive,
+  each one holding its own MQTT session against the same device.
+
+### Added
+
+- Regression tests covering daemon shutdown signalling.
+
+---
+
 ## [4.0.1] — 25/08/2026
 
 ### Fixed
