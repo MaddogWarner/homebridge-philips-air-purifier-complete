@@ -6,6 +6,22 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [4.0.0] — 24/08/2026
+
+### Breaking Changes
+
+- **Air+ Cloud:** Existing users must re-run `scripts/airplus_setup.py` once for each purifier after
+  upgrading. Existing token files do not contain the `id_token` now required to derive the Philips
+  MQTT user ID, so the daemon cannot connect until setup writes a new token file.
+
+### Fixed
+
+- Persist refreshed Air+ identity tokens and retry MQTT user-ID discovery once after an HTTP 401.
+- Fail Air+ setup explicitly when Philips omits the required identity token.
+- Keep raw upstream authentication response bodies out of Homebridge logs.
+
+---
+
 ## [3.3.1] — 19/07/2026
 
 ### Changed

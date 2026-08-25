@@ -395,6 +395,10 @@ If your device shows `Network error: NetworkError` on every command, try setting
 
 ## Air+ Cloud Setup (AC0650, AC1715)
 
+> **Breaking change for existing Air+ users:** After upgrading to 4.0.0, re-run
+> `scripts/airplus_setup.py` once for each purifier before restarting Homebridge. Existing token
+> files do not contain the required `id_token`.
+
 ### Quick Setup (Homebridge UI — recommended)
 
 1. Install the plugin via the Homebridge UI

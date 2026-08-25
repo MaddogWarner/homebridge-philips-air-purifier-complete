@@ -23,6 +23,7 @@ import signal
 import time
 import urllib.error
 import urllib.request
+import uuid
 from typing import Dict, Any, Optional
 
 try:
@@ -583,6 +584,8 @@ class AirPlusCloudClient:
         self._tokens["access_token"] = resp["access_token"]
         if "refresh_token" in resp:
             self._tokens["refresh_token"] = resp["refresh_token"]
+        if resp.get("id_token"):
+            self._tokens["id_token"] = resp["id_token"]
         self._tokens["expires_at"] = time.time() + resp.get("expires_in", 3600)
         self._save_tokens()
 
@@ -598,50 +601,164 @@ class AirPlusCloudClient:
             self._refresh_token()
             return self._api_get("/da/user/self/signature")["signature"]
 
+    def _fetch_mqtt_user_id(self) -> str:
+        cached = self._tokens.get("mqtt_user_id")
+        if cached:
+            return cached
+
+        for attempt in range(2):
+            id_token = self._tokens.get("id_token")
+            if not id_token:
+                raise RuntimeError(
+                    "Token file has no id_token; rerun scripts/airplus_setup.py"
+                )
+
+            req = urllib.request.Request(
+                f"{_AIRPLUS_API_BASE}/da/user/self/get-id",
+                data=json.dumps({"idToken": id_token}).encode(),
+                headers={
+                    "Authorization": f"Bearer {self._tokens['access_token']}",
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                    "User-Agent": _AIRPLUS_USER_AGENT,
+                },
+                method="POST",
+            )
+
+            try:
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    result = json.loads(r.read())
+                break
+            except urllib.error.HTTPError as e:
+                e.close()
+                if e.code == 401 and attempt == 0:
+                    previous_id_token = id_token
+                    self._refresh_token()
+                    if self._tokens.get("id_token") == previous_id_token:
+                        raise RuntimeError(
+                            "Air+ id_token is expired and was not renewed on refresh; "
+                            "rerun scripts/airplus_setup.py"
+                        ) from e
+                    continue
+                raise ConnectionError(
+                    f"MQTT get-id failed: HTTP {e.code}; upstream response omitted"
+                ) from e
+
+        user_id = result.get("userId")
+        if not user_id:
+            raise RuntimeError("MQTT get-id returned no userId")
+
+        self._tokens["mqtt_user_id"] = user_id
+        self._save_tokens()
+        return user_id
+
     def connect(self):
         self._load_tokens()
         self._ensure_token()
-        signature = self._fetch_signature()
+
+        mqtt_user_id = self._fetch_mqtt_user_id()
+
+        # Philips APK format: {userId}_{UUID}
+        client_id = f"{mqtt_user_id}_{uuid.uuid4()}"
 
         client = _paho_mqtt.Client(
-            client_id=f"hb-{self._uuid[:8]}",
+            client_id=client_id,
             transport="websockets",
         )
+
         client.tls_set_context(ssl.create_default_context())
-        client.ws_set_options(
-            path=_AIRPLUS_MQTT_PATH,
-            headers={
+
+        def _apply_ws_headers(default_headers):
+            # Runs on every WebSocket handshake, including Paho's
+            # automatic reconnects.  Tokens expire hourly and AWS IoT
+            # drops the connection when they do, so each handshake must
+            # carry a currently-valid access token and a fresh
+            # signature — a snapshot taken at connect() time would make
+            # every reconnect attempt fail with a stale token.
+            try:
+                self._ensure_token()
+                signature = self._fetch_signature()
+            except Exception as e:
+                error_detail = type(e).__name__
+                if isinstance(e, urllib.error.HTTPError):
+                    error_detail += f" (HTTP {e.code})"
+                print(json.dumps({
+                    "type": "log",
+                    "event": "mqtt_auth_error",
+                    "message": f"Failed to refresh MQTT credentials: {error_detail}; "
+                               "upstream response omitted",
+                }), flush=True)
+                # Paho's reconnect loop only survives OSError; anything
+                # else would kill the network thread and end reconnects.
+                raise ConnectionError(
+                    f"MQTT credential refresh failed: {error_detail}"
+                ) from e
+            # Match Philips app: don't send Paho's default Origin header.
+            default_headers.pop("Origin", None)
+            default_headers.update({
                 "x-amz-customauthorizer-name": "CustomAuthorizer",
                 "x-amz-customauthorizer-signature": signature,
                 "tenant": "da",
                 "token-header": f"Bearer {self._tokens['access_token']}",
-                "Sec-WebSocket-Protocol": "mqtt",
-            },
+                "content-type": "application/json",
+            })
+            return default_headers
+
+        client.ws_set_options(
+            path=_AIRPLUS_MQTT_PATH,
+            headers=_apply_ws_headers,
         )
+
         client.on_connect = self._on_connect
         client.on_message = self._on_message
         client.on_disconnect = self._on_disconnect
-        client.connect(_AIRPLUS_MQTT_HOST, _AIRPLUS_MQTT_PORT, keepalive=60)
+
+        self._ready.clear()
+        self._connect_rc = None
+
+        client.connect(
+            _AIRPLUS_MQTT_HOST,
+            _AIRPLUS_MQTT_PORT,
+            keepalive=60,
+        )
+
         client.loop_start()
         self._mqtt = client
-        # Wait for connection (up to 15s)
+
         if not self._ready.wait(timeout=15):
-            raise ConnectionError("MQTT connection timed out")
+            raise ConnectionError(
+                "MQTT connection timed out before CONNACK"
+            )
+
+        if not self._connected:
+            raise ConnectionError(
+                f"MQTT connection rejected (CONNACK rc={self._connect_rc})"
+            )
 
     def _on_connect(self, client, userdata, flags, rc, properties=None):
+        self._connect_rc = rc
+
+        print(json.dumps({
+            "type": "log",
+            "event": "mqtt_connack",
+            "message": f"MQTT CONNACK rc={rc}",
+        }), flush=True)
+
         if rc == 0:
             self._connected = True
+
             inbound = f"da_ctrl/{self._device_id}/from_ncp"
             client.subscribe(inbound, qos=0)
-            # Request initial status
+
             client.publish(
                 f"da_ctrl/{self._device_id}/to_ncp",
                 '{"cn":"getPort","data":{"portName":"Status"}}',
                 qos=0,
             )
-            self._ready.set()
         else:
             self._connected = False
+
+        self._ready.set()
 
     def _on_message(self, client, userdata, msg):
         try:
@@ -657,13 +774,22 @@ class AirPlusCloudClient:
 
     def _on_disconnect(self, client, userdata, rc, properties=None):
         self._connected = False
+        print(json.dumps({
+            "type": "log",
+            "event": "mqtt_disconnect",
+            "message": f"MQTT disconnected (rc={rc}); Paho will reconnect "
+                       "with refreshed credentials",
+        }), flush=True)
 
     def get_status_queue(self):
         return self._state_queue
 
     def set_values(self, values: Dict[str, Any]):
         if not self._mqtt or not self._connected:
-            return
+            # Raising (rather than returning) lets the daemon report
+            # success:false, so HomeKit shows the failure instead of a
+            # phantom success while the connection is down.
+            raise ConnectionError("MQTT not connected")
         control_topic = f"da_ctrl/{self._device_id}/to_ncp"
         shadow_topic = f"$aws/things/{self._device_id}/shadow/update"
 
@@ -1311,10 +1437,28 @@ class AirPlusCloudDaemon:
             await asyncio.to_thread(self._client.disconnect)
         print(json.dumps({"type": "shutdown"}), flush=True)
 
+    # If MQTT stays down this long, reconnecting with refreshed
+    # credentials has failed (e.g. revoked refresh token) — exit so the
+    # plugin's daemon-restart logic can rebuild everything from scratch.
+    _DISCONNECT_EXIT_SECONDS = 300
+
     async def _state_loop(self):
         import queue as _queue_module
         q = self._client.get_status_queue()
+        disconnected_since = None
         while not self._shutdown_event.is_set():
+            if self._client._connected:
+                disconnected_since = None
+            elif disconnected_since is None:
+                disconnected_since = time.time()
+            elif time.time() - disconnected_since > self._DISCONNECT_EXIT_SECONDS:
+                self._log(
+                    "mqtt_dead",
+                    f"MQTT down for over {self._DISCONNECT_EXIT_SECONDS}s "
+                    "and not recovering; exiting for daemon restart",
+                )
+                self._shutdown_event.set()
+                break
             try:
                 raw = await asyncio.to_thread(q.get, True, 1.0)
                 state = parse_status(raw)
