@@ -16,12 +16,52 @@ const AUTHORIZE_ENDPOINT = OIDC_BASE + '/authorize';
 const GIGYA_BASE = 'https://cdc.accounts.home.id';
 const OTP_SEND_ENDPOINT = '/accounts.auth.otp.email.sendCode';
 const OTP_LOGIN_ENDPOINT = '/accounts.auth.otp.email.login';
-const GET_IDS_ENDPOINT = '/accounts.socialize.getIDs';
+const GET_IDS_ENDPOINT = '/socialize.getIDs';
 const API_BASE = 'https://prod.eu-da.iot.versuni.com/api';
 const USER_AGENT = 'okhttp/4.12.0 (Android 14; Pixel 7)';
 const SCOPE =
   'openid email profile DI.Account.read DI.Account.write DI.AccountProfile.read DI.AccountProfile.write DI.AccountGeneralConsent.read DI.AccountGeneralConsent.write DI.GeneralConsent.read subscriptions profile_extended consents DI.AccountSubscription.read DI.AccountSubscription.write';
 const DEBUG_AUTH = process.env.PHILIPS_AIRPLUS_DEBUG === '1';
+
+/**
+ * Minimal cookie store for the CDC handshake.
+ *
+ * The OIDC authorise → getIDs → continue sequence only works if the session
+ * cookies CDC sets along the way are replayed on the following requests, which
+ * is what `http.cookiejar` does for scripts/airplus_setup.py. Cookies are keyed
+ * by the exact host that set them and never sent anywhere else, so nothing can
+ * leak to the Versuni device API.
+ */
+class HostCookieJar {
+  constructor() {
+    this._byHost = new Map();
+  }
+
+  store(hostname, setCookieHeader) {
+    if (!hostname || !setCookieHeader) return;
+    const jar = this._byHost.get(hostname) || new Map();
+    for (const raw of [].concat(setCookieHeader)) {
+      const pair = String(raw).split(';')[0];
+      const separator = pair.indexOf('=');
+      if (separator <= 0) continue;
+      const name = pair.slice(0, separator).trim();
+      const value = pair.slice(separator + 1).trim();
+      if (!name) continue;
+      if (!value) {
+        jar.delete(name);
+      } else {
+        jar.set(name, value);
+      }
+    }
+    this._byHost.set(hostname, jar);
+  }
+
+  header(hostname) {
+    const jar = this._byHost.get(hostname);
+    if (!jar || jar.size === 0) return null;
+    return Array.from(jar, ([name, value]) => name + '=' + value).join('; ');
+  }
+}
 
 class AirPlusSetupServer extends HomebridgePluginUiServer {
   constructor() {
@@ -29,6 +69,7 @@ class AirPlusSetupServer extends HomebridgePluginUiServer {
     this._pkce = null;
     this._otp = null;
     this._tokens = null;
+    this._cookies = new HostCookieJar();
     this.onRequest('/auth/init', this.handleInit.bind(this));
     this.onRequest('/auth/exchange', this.handleExchange.bind(this));
     this.onRequest('/auth/otp/send', this.handleOtpSend.bind(this));
@@ -153,11 +194,17 @@ class AirPlusSetupServer extends HomebridgePluginUiServer {
       throw new Error('Gigya getIDs did not return gmidTicket');
     }
 
-    const continueUrl = new URL(authLocation, AUTHORIZE_ENDPOINT);
-    continueUrl.searchParams.set('context', context);
-    continueUrl.searchParams.set('login_token', loginToken);
-    continueUrl.searchParams.set('gmidTicket', gmidTicket);
-    continueUrl.searchParams.set('client_id', CLIENT_ID);
+    // Resume the flow at the OIDC continue endpoint with exactly the parameters
+    // scripts/airplus_setup.py sends. The authorise redirect can point at the hosted
+    // login page rather than /continue, and that page does not accept the login_token
+    // handshake, so the location is only read for its context parameter.
+    const continueUrl = new URL(AUTHORIZE_ENDPOINT + '/continue');
+    continueUrl.search = new URLSearchParams({
+      context,
+      login_token: loginToken,
+      gmidTicket,
+      client_id: CLIENT_ID,
+    }).toString();
     const appRedirect = await this._getRedirectLocation(continueUrl, 'OIDC continue');
     const authCode = this._extractCode(appRedirect);
     if (!authCode) {
@@ -180,12 +227,19 @@ class AirPlusSetupServer extends HomebridgePluginUiServer {
     }
 
     const tokenPath = path.join(os.homedir(), '.homebridge', 'philips-airplus-' + uuid + '.json');
-    const { access_token, refresh_token, expires_in } = this._tokens;
+    const { access_token, refresh_token, id_token, expires_in } = this._tokens;
+    if (typeof id_token !== 'string' || !id_token.trim()) {
+      throw new Error(
+        'The stored Air+ token has no id_token; Air+ MQTT setup cannot continue. ' +
+        'Log in again to obtain a complete token.'
+      );
+    }
     const tokenData = {
       access_token,
-      refresh_token,
+      refresh_token: refresh_token || '',
+      id_token,
       client_id: CLIENT_ID,
-      expires_at: Date.now() / 1000 + expires_in,
+      expires_at: Date.now() / 1000 + (expires_in || 3600),
     };
 
     const tmp = tokenPath + '.tmp';
@@ -265,8 +319,19 @@ class AirPlusSetupServer extends HomebridgePluginUiServer {
       tokenBody.toString()
     );
 
-    const { access_token, refresh_token, expires_in } = tokenResponse;
-    this._tokens = { access_token, refresh_token, expires_in };
+    const { access_token, refresh_token, expires_in, id_token } = tokenResponse;
+    if (!access_token) {
+      throw new Error('Philips did not return an access token.');
+    }
+    // philips_air_api.py derives the MQTT user ID from the identity token, so a token
+    // file without one is unusable. Fail here rather than writing a dead token file.
+    if (typeof id_token !== 'string' || !id_token.trim()) {
+      throw new Error(
+        'No id_token in token response; Air+ MQTT setup cannot continue. ' +
+        'Log in again, and if it keeps happening use scripts/airplus_setup.py.'
+      );
+    }
+    this._tokens = { access_token, refresh_token, id_token, expires_in };
     console.log('Air+ tokens received');
 
     const deviceUrl = new URL(API_BASE + '/da/user/self/device');
@@ -384,12 +449,19 @@ class AirPlusSetupServer extends HomebridgePluginUiServer {
     console.log('[Air+ auth debug] ' + label + ' HTTP ' + status + ' Location: ' + safeLocation);
   }
 
+  _withCookies(options) {
+    const cookie = this._cookies.header(options.hostname);
+    if (!cookie) return options;
+    return { ...options, headers: { ...(options.headers || {}), Cookie: cookie } };
+  }
+
   _httpsRaw(options, postBody) {
     return new Promise((resolve, reject) => {
-      const req = https.request(options, (res) => {
+      const req = https.request(this._withCookies(options), (res) => {
         const chunks = [];
         res.on('data', (chunk) => chunks.push(chunk));
         res.on('end', () => {
+          this._cookies.store(options.hostname, res.headers['set-cookie']);
           resolve({
             status: res.statusCode,
             headers: res.headers,
@@ -436,10 +508,13 @@ class AirPlusSetupServer extends HomebridgePluginUiServer {
 
   _httpsGetRaw(options) {
     return new Promise((resolve, reject) => {
-      const req = https.request(options, (res) => {
+      const req = https.request(this._withCookies(options), (res) => {
         const chunks = [];
         res.on('data', (chunk) => chunks.push(chunk));
-        res.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+        res.on('end', () => {
+          this._cookies.store(options.hostname, res.headers['set-cookie']);
+          resolve(Buffer.concat(chunks).toString('utf8'));
+        });
       });
       req.on('error', reject);
       req.end();
