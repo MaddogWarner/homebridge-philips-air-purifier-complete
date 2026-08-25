@@ -6,6 +6,26 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [4.0.1] — 25/08/2026
+
+### Fixed
+
+- **Air+ setup wizard:** the Homebridge UI login completes again. It asked Gigya for
+  `/accounts.socialize.getIDs`, which CDC answers with `Permission denied`; it also discarded the
+  CDC session cookies and resumed the login at the address the authorise redirect pointed to
+  instead of the OIDC continue endpoint. The wizard now performs the same handshake as
+  `scripts/airplus_setup.py`.
+- **Air+ setup wizard:** token files written by the wizard now contain the `id_token` that 4.0.0
+  requires. Without it the daemon stopped with `Token file has no id_token; rerun
+  scripts/airplus_setup.py` immediately after a successful-looking setup. Setup now fails with a
+  clear error when Philips omits the identity token, instead of writing an unusable token file.
+
+### Added
+
+- Regression tests for the setup wizard backend, run by `npm test` alongside the Python suite.
+
+---
+
 ## [4.0.0] — 24/08/2026
 
 ### Breaking Changes
