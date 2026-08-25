@@ -1597,12 +1597,31 @@ async def run_daemon(
         daemon = HTTPPollingDaemon(host)
     else:
         daemon = ObserveDaemon(host)
+    _install_shutdown_handlers(daemon)
+    await daemon.start()
+
+
+def _install_shutdown_handlers(daemon) -> None:
+    """Route SIGINT/SIGTERM to ``daemon.shutdown`` on the running event loop.
+
+    Must be called from inside the loop that will run the daemon: signal
+    handlers are registered per event loop, so ones added to a loop that
+    never runs are never delivered — and, because installing them still
+    replaces the process-default disposition, the signal is swallowed and
+    the daemon outlives the parent that tried to stop it.
+    """
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
         try:
             loop.add_signal_handler(sig, daemon.shutdown)
         except NotImplementedError:
             pass
+
+
+async def run_airplus_cloud_daemon(device_uuid: str, token_file: str):
+    """Run the Air+ cloud daemon with shutdown handlers bound to its own loop."""
+    daemon = AirPlusCloudDaemon(device_uuid, token_file)
+    _install_shutdown_handlers(daemon)
     await daemon.start()
 
 
@@ -1749,14 +1768,7 @@ def main():
         if parsed.protocol == "airplus-cloud":
             if not parsed.device_uuid or not parsed.token_file:
                 sys.exit("--device-uuid and --token-file are required for airplus-cloud protocol")
-            daemon = AirPlusCloudDaemon(parsed.device_uuid, parsed.token_file)
-            loop = asyncio.get_event_loop()
-            for sig in (signal.SIGINT, signal.SIGTERM):
-                try:
-                    loop.add_signal_handler(sig, daemon.shutdown)
-                except NotImplementedError:
-                    pass
-            asyncio.run(daemon.start())
+            asyncio.run(run_airplus_cloud_daemon(parsed.device_uuid, parsed.token_file))
         else:
             asyncio.run(run_daemon(
                 parsed.host,
