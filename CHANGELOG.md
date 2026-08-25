@@ -6,6 +6,22 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [4.1.0] — 26/08/2026
+
+### Added
+
+- **AC1715 Air+ Cloud:** model-aware mode values, fan-speed controls, display-light handling and
+  control messages, gated on the daemon-reported model identifier so other models retain their
+  existing behaviour.
+
+### Fixed
+
+- Air+ model recovery no longer performs blocking network I/O on the asyncio event loop, and emits
+  actionable warnings before a command falls back to the generic mode mapping.
+- Air+ reconnect tests no longer contact the Philips device API.
+
+---
+
 ## [4.0.2] — 25/08/2026
 
 ### Fixed

@@ -665,7 +665,13 @@ class AirPlusCloudClient:
 
         try:
             response = self._api_get("/da/user/self/device")
-        except Exception:
+        except Exception as error:
+            print(json.dumps({
+                "type": "warning",
+                "event": "airplus_model_lookup_failed",
+                "message": "Air+ model lookup failed "
+                           f"({type(error).__name__}); model remains unknown",
+            }), flush=True)
             return None
 
         if isinstance(response, list):
@@ -1773,10 +1779,17 @@ class AirPlusCloudDaemon:
             if args:
                 mode = str(args[0]).lower()
                 model_id = (
-                    self._client.ensure_model_id()
+                    await asyncio.to_thread(self._client.ensure_model_id)
                     if self._client
                     else None
                 )
+                if self._client and model_id is None:
+                    print(json.dumps({
+                        "type": "warning",
+                        "event": "airplus_model_unknown",
+                        "message": "Air+ model is unknown; using the generic "
+                                   "mode mapping for this command",
+                    }), flush=True)
                 if _airplus_mode_to_dcode(mode, model_id) is None:
                     raise ValueError(f"Invalid mode: {mode}")
                 if self._client:

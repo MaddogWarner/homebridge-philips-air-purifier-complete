@@ -337,6 +337,10 @@ class DaemonHandler {
           this.log.debug(`Daemon [${message.event}]: ${message.message}`);
           break;
 
+        case 'warning':
+          this.log.warn(`Daemon [${message.event}]: ${message.message}`);
+          break;
+
         case 'error':
           this.log.error(`Daemon error: ${message.error}`);
           break;
@@ -874,8 +878,8 @@ class PhilipsAirPurifierAccessory {
       this.lightService =
         this.platformAcc.getServiceById(Service.Switch, 'display-light') ||
         this.platformAcc.addService(Service.Switch, 'Display Light', 'display-light');
-      this.lightService.displayName = 'Light';
-      this.lightService.setCharacteristic(Characteristic.Name, 'Light');
+      this.lightService.displayName = 'Display Light';
+      this.lightService.setCharacteristic(Characteristic.Name, 'Display Light');
       this.lightService.getCharacteristic(Characteristic.On)
         .onGet(() => this.state.lightLevel > 0)
         .onSet(async (value) => {
@@ -970,8 +974,14 @@ class PhilipsAirPurifierAccessory {
         this.updateSleepCharacteristics();
       });
 
-    this.purifierService.addLinkedService(this.lightService);
-    this.purifierService.addLinkedService(this.sleepService);
+    const linkedModelServices = [this.lightService, this.sleepService];
+    const previouslyLinked = this._linkedModelServices || [];
+    for (const service of linkedModelServices) {
+      if (!previouslyLinked.includes(service)) {
+        this.purifierService.addLinkedService(service);
+      }
+    }
+    this._linkedModelServices = linkedModelServices;
   }
 
   pm25ToAirQuality(pm25) {

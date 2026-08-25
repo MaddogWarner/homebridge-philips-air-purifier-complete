@@ -6,6 +6,7 @@ import io
 import json
 import queue
 import sys
+import threading
 import unittest
 from pathlib import Path
 
@@ -104,8 +105,6 @@ class AirPlusParsStatusTests(unittest.TestCase):
         # D03102=1 wins; D0310D=0 is ignored
         self.assertTrue(result["power"])
         self.assertEqual(result["mode"], "medium")
-
-
 
     def test_airplus_ac1715_uses_model_specific_mode_values(self):
         raw = {
@@ -208,15 +207,38 @@ class AirPlusModelIdRecoveryTests(unittest.TestCase):
         self.assertEqual(client._fetch_model_id(), "AC1715/11")
         self.assertEqual(client._tokens["model_id"], "AC1715/11")
 
+    def test_fetch_model_id_warns_without_leaking_error_details(self):
+        client = AirPlusCloudClient.__new__(AirPlusCloudClient)
+        client._uuid = "uuid-1"
+        client._tokens = {}
+
+        def fail_lookup(path):
+            raise ConnectionError("secret-upstream-detail")
+
+        client._api_get = fail_lookup
+
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertIsNone(client._fetch_model_id())
+
+        warning = json.loads(output.getvalue())
+        self.assertEqual(warning["type"], "warning")
+        self.assertEqual(warning["event"], "airplus_model_lookup_failed")
+        self.assertIn("ConnectionError", warning["message"])
+        self.assertNotIn("secret-upstream-detail", warning["message"])
+
     def test_mode_command_recovers_model_id_before_validation(self):
         daemon = AirPlusCloudDaemon("uuid-1", "/nonexistent-token-file")
         set_calls = []
+        ensure_threads = []
+        event_loop_thread = threading.get_ident()
 
         class _StubClient:
             def get_model_id(self):
                 return None
 
             def ensure_model_id(self):
+                ensure_threads.append(threading.get_ident())
                 return "AC1715/11"
 
             def set_values(self, values):
@@ -228,6 +250,31 @@ class AirPlusModelIdRecoveryTests(unittest.TestCase):
 
         self.assertEqual(result, {"mode": "fast"})
         self.assertEqual(set_calls, [{"mode": "fast"}])
+        self.assertEqual(len(ensure_threads), 1)
+        self.assertNotEqual(ensure_threads[0], event_loop_thread)
+
+    def test_mode_command_warns_before_using_generic_fallback(self):
+        daemon = AirPlusCloudDaemon("uuid-1", "/nonexistent-token-file")
+        set_calls = []
+
+        class _StubClient:
+            def ensure_model_id(self):
+                return None
+
+            def set_values(self, values):
+                set_calls.append(values)
+
+        daemon._client = _StubClient()
+
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            result = asyncio.run(daemon._execute_command("mode", ["auto"]))
+
+        warning = json.loads(output.getvalue())
+        self.assertEqual(warning["type"], "warning")
+        self.assertEqual(warning["event"], "airplus_model_unknown")
+        self.assertEqual(result, {"mode": "auto"})
+        self.assertEqual(set_calls, [{"mode": "auto"}])
 
 
 class AirPlusCloudDaemonMessageTests(unittest.TestCase):
@@ -249,6 +296,8 @@ class AirPlusCloudDaemonMessageTests(unittest.TestCase):
         class _StubClient:
             def __init__(self):
                 self._queue = _StubQueue()
+                # _state_loop consults this before publishing an update.
+                self._connected = True
 
             def get_status_queue(self):
                 return self._queue
