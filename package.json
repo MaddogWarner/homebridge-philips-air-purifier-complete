@@ -43,7 +43,7 @@
   "scripts": {
     "preinstall": "bash preinstall.sh",
     "postinstall": "bash postinstall.sh",
-    "test": "python3 -m unittest discover -s tests",
+    "test": "python3 -m unittest discover -s tests && node --test tests/js/*.js",
     "lint": "eslint .",
     "format": "prettier -w ."
   }
