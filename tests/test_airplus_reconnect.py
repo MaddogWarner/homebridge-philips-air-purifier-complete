@@ -160,6 +160,7 @@ class AirPlusReconnectTests(unittest.TestCase):
     def setUp(self):
         self.clock = FakeClock()
         self.broker = FakeBroker(self.clock)
+        self.api_get_attempts = []
         FakePahoModule.broker = self.broker
 
         self._tmp = TemporaryDirectory()
@@ -185,9 +186,12 @@ class AirPlusReconnectTests(unittest.TestCase):
         philips_air_api.time = types.SimpleNamespace(
             time=lambda: self.clock.now, sleep=lambda s: None)
         AirPlusCloudClient._fetch_signature = lambda self_: "sig"
-        AirPlusCloudClient._api_get = lambda *_: self.fail(
-            "AirPlusReconnectTests attempted an outbound device-model request"
-        )
+
+        def unexpected_api_get(client_self, path):
+            self.api_get_attempts.append(path)
+            return []
+
+        AirPlusCloudClient._api_get = unexpected_api_get
 
         clock, broker, refresh_count = self.clock, self.broker, [0]
         self.refresh_count = refresh_count
@@ -210,6 +214,11 @@ class AirPlusReconnectTests(unittest.TestCase):
         AirPlusCloudClient._refresh_token = self._orig["refresh"]
         AirPlusCloudClient._api_get = self._orig["api_get"]
         self._tmp.cleanup()
+        self.assertEqual(
+            self.api_get_attempts,
+            [],
+            "AirPlusReconnectTests attempted an outbound device-model request",
+        )
 
     def test_recovers_after_token_expiry_disconnect(self):
         client = AirPlusCloudClient("da-test-uuid", self.token_file)

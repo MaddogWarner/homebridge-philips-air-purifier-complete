@@ -291,7 +291,7 @@ class DaemonHandler {
             clearTimeout(timeout);
             this.rl.removeListener('line', readyHandler);
             this.connected = response.connected;
-            if (response.model_id && this.onModelId) this.onModelId(response.model_id);
+            this._notifyModelId(response.model_id);
             if (response.connected) {
               this.log.info(`Daemon ready, waiting for first ${protocol === 'coap' ? 'observe' : 'poll'} update...`);
             } else {
@@ -322,6 +322,16 @@ class DaemonHandler {
     this.observing = false;
   }
 
+  _notifyModelId(modelId) {
+    if (!modelId || !this.onModelId) return;
+    try {
+      this.onModelId(modelId);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      this.log.error(`Model reconfiguration failed for ${modelId}: ${detail}`);
+    }
+  }
+
   handleMessage(line) {
     try {
       const message = JSON.parse(line);
@@ -329,8 +339,8 @@ class DaemonHandler {
         case 'update':
           this.observing = true;
           this.log.debug(`Observe update: pm25=${message.data?.pm25}`);
-          if (message.model_id && this.onModelId) this.onModelId(message.model_id);
           if (this.onUpdate) this.onUpdate(message.data);
+          this._notifyModelId(message.model_id);
           break;
 
         case 'log':
@@ -1156,3 +1166,5 @@ class LegacyPlatformAccessory {
     return this.services;
   }
 }
+
+module.exports._DaemonHandler = DaemonHandler;

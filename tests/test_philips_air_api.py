@@ -9,6 +9,8 @@ import sys
 import threading
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -275,6 +277,65 @@ class AirPlusModelIdRecoveryTests(unittest.TestCase):
         self.assertEqual(warning["event"], "airplus_model_unknown")
         self.assertEqual(result, {"mode": "auto"})
         self.assertEqual(set_calls, [{"mode": "auto"}])
+
+
+class AirPlusTokenFileTests(unittest.TestCase):
+    def test_concurrent_token_writes_are_serialised(self):
+        import philips_air_api as api
+
+        with TemporaryDirectory() as tmp_dir:
+            token_file = str(Path(tmp_dir) / "tokens.json")
+            with mock.patch.object(api, "_paho_mqtt", object()):
+                client = AirPlusCloudClient("uuid-1", token_file)
+
+            client._tokens = {
+                "access_token": "access-1",
+                "refresh_token": "refresh-1",
+                "id_token": "id-1",
+                "expires_at": 1_000_000,
+            }
+
+            real_dump = json.dump
+            active_lock = threading.Lock()
+            start = threading.Barrier(3)
+            errors = []
+            active_writers = 0
+            max_active_writers = 0
+
+            def slow_dump(*args, **kwargs):
+                nonlocal active_writers, max_active_writers
+                with active_lock:
+                    active_writers += 1
+                    max_active_writers = max(max_active_writers, active_writers)
+                try:
+                    threading.Event().wait(0.05)
+                    return real_dump(*args, **kwargs)
+                finally:
+                    with active_lock:
+                        active_writers -= 1
+
+            def save_tokens():
+                try:
+                    start.wait()
+                    client._save_tokens()
+                except Exception as error:
+                    errors.append(error)
+
+            threads = [threading.Thread(target=save_tokens) for _ in range(2)]
+            with mock.patch.object(api.json, "dump", side_effect=slow_dump):
+                for thread in threads:
+                    thread.start()
+                start.wait()
+                for thread in threads:
+                    thread.join(timeout=2)
+
+            self.assertFalse(any(thread.is_alive() for thread in threads))
+            self.assertEqual(errors, [])
+            self.assertEqual(max_active_writers, 1)
+
+            saved = json.loads(Path(token_file).read_text())
+            self.assertEqual(saved["refresh_token"], "refresh-1")
+            self.assertTrue(saved["refresh_token"])
 
 
 class AirPlusCloudDaemonMessageTests(unittest.TestCase):

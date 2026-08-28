@@ -644,6 +644,7 @@ class AirPlusCloudClient:
         import threading
         self._state_queue: _queue_module.Queue = _queue_module.Queue()
         self._ready = threading.Event()
+        self._token_write_lock = threading.Lock()
         self._model_id: Optional[str] = None
 
     def _load_tokens(self):
@@ -651,12 +652,13 @@ class AirPlusCloudClient:
             self._tokens = json.load(f)
 
     def _save_tokens(self):
-        tmp = self._token_file + ".tmp"
-        with open(tmp, "w") as f:
-            json.dump(self._tokens, f, indent=2)
-        os.chmod(tmp, 0o600)
-        os.replace(tmp, self._token_file)
-        os.chmod(self._token_file, 0o600)
+        with self._token_write_lock:
+            tmp = self._token_file + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump(self._tokens, f, indent=2)
+            os.chmod(tmp, 0o600)
+            os.replace(tmp, self._token_file)
+            os.chmod(self._token_file, 0o600)
 
     def _fetch_model_id(self) -> Optional[str]:
         cached = self._tokens.get("model_id")
