@@ -160,6 +160,7 @@ class AirPlusReconnectTests(unittest.TestCase):
     def setUp(self):
         self.clock = FakeClock()
         self.broker = FakeBroker(self.clock)
+        self.api_get_attempts = []
         FakePahoModule.broker = self.broker
 
         self._tmp = TemporaryDirectory()
@@ -170,6 +171,7 @@ class AirPlusReconnectTests(unittest.TestCase):
             "refresh_token": "refresh-1",
             "id_token": "idt-1",
             "mqtt_user_id": "user-1",
+            "model_id": "AC0650",
             "expires_at": self.clock.now + TOKEN_LIFETIME,
         }))
 
@@ -178,11 +180,18 @@ class AirPlusReconnectTests(unittest.TestCase):
             "time": philips_air_api.time,
             "sig": AirPlusCloudClient._fetch_signature,
             "refresh": AirPlusCloudClient._refresh_token,
+            "api_get": AirPlusCloudClient._api_get,
         }
         philips_air_api._paho_mqtt = FakePahoModule
         philips_air_api.time = types.SimpleNamespace(
             time=lambda: self.clock.now, sleep=lambda s: None)
         AirPlusCloudClient._fetch_signature = lambda self_: "sig"
+
+        def unexpected_api_get(client_self, path):
+            self.api_get_attempts.append(path)
+            return []
+
+        AirPlusCloudClient._api_get = unexpected_api_get
 
         clock, broker, refresh_count = self.clock, self.broker, [0]
         self.refresh_count = refresh_count
@@ -203,7 +212,13 @@ class AirPlusReconnectTests(unittest.TestCase):
         philips_air_api.time = self._orig["time"]
         AirPlusCloudClient._fetch_signature = self._orig["sig"]
         AirPlusCloudClient._refresh_token = self._orig["refresh"]
+        AirPlusCloudClient._api_get = self._orig["api_get"]
         self._tmp.cleanup()
+        self.assertEqual(
+            self.api_get_attempts,
+            [],
+            "AirPlusReconnectTests attempted an outbound device-model request",
+        )
 
     def test_recovers_after_token_expiry_disconnect(self):
         client = AirPlusCloudClient("da-test-uuid", self.token_file)
