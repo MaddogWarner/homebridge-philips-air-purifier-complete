@@ -20,6 +20,7 @@ import secrets
 import ssl
 import sys
 import signal
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -653,12 +654,29 @@ class AirPlusCloudClient:
 
     def _save_tokens(self):
         with self._token_write_lock:
-            tmp = self._token_file + ".tmp"
-            with open(tmp, "w") as f:
-                json.dump(self._tokens, f, indent=2)
-            os.chmod(tmp, 0o600)
-            os.replace(tmp, self._token_file)
-            os.chmod(self._token_file, 0o600)
+            token_dir = os.path.dirname(self._token_file) or "."
+            token_name = os.path.basename(self._token_file)
+            tmp = None
+            try:
+                with tempfile.NamedTemporaryFile(
+                    mode="w",
+                    dir=token_dir,
+                    prefix=f".{token_name}.",
+                    suffix=".tmp",
+                    delete=False,
+                ) as f:
+                    tmp = f.name
+                    json.dump(self._tokens, f, indent=2)
+                os.chmod(tmp, 0o600)
+                os.replace(tmp, self._token_file)
+                tmp = None
+                os.chmod(self._token_file, 0o600)
+            finally:
+                if tmp is not None:
+                    try:
+                        os.unlink(tmp)
+                    except FileNotFoundError:
+                        pass
 
     def _fetch_model_id(self) -> Optional[str]:
         cached = self._tokens.get("model_id")

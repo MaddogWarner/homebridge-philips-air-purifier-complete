@@ -337,6 +337,62 @@ class AirPlusTokenFileTests(unittest.TestCase):
             self.assertEqual(saved["refresh_token"], "refresh-1")
             self.assertTrue(saved["refresh_token"])
 
+    def test_independent_clients_use_unique_temporary_files(self):
+        import philips_air_api as api
+
+        with TemporaryDirectory() as tmp_dir:
+            token_path = Path(tmp_dir) / "tokens.json"
+            with mock.patch.object(api, "_paho_mqtt", object()):
+                clients = [
+                    AirPlusCloudClient("uuid-1", str(token_path)),
+                    AirPlusCloudClient("uuid-2", str(token_path)),
+                ]
+
+            for index, client in enumerate(clients, start=1):
+                client._tokens = {
+                    "access_token": f"access-{index}",
+                    "refresh_token": f"refresh-{index}",
+                    "id_token": f"id-{index}",
+                    "expires_at": 1_000_000 + index,
+                }
+
+            real_dump = json.dump
+            writers_ready = threading.Barrier(2)
+            temporary_paths = []
+            paths_lock = threading.Lock()
+            errors = []
+
+            def overlapping_dump(data, file, **kwargs):
+                with paths_lock:
+                    temporary_paths.append(file.name)
+                writers_ready.wait(timeout=2)
+                return real_dump(data, file, **kwargs)
+
+            def save_tokens(client):
+                try:
+                    client._save_tokens()
+                except Exception as error:
+                    errors.append(error)
+
+            threads = [
+                threading.Thread(target=save_tokens, args=(client,))
+                for client in clients
+            ]
+            with mock.patch.object(api.json, "dump", side_effect=overlapping_dump):
+                for thread in threads:
+                    thread.start()
+                for thread in threads:
+                    thread.join(timeout=3)
+
+            self.assertFalse(any(thread.is_alive() for thread in threads))
+            self.assertEqual(errors, [])
+            self.assertEqual(len(set(temporary_paths)), 2)
+
+            saved = json.loads(token_path.read_text())
+            self.assertIn(saved["refresh_token"], {"refresh-1", "refresh-2"})
+            self.assertTrue(saved["refresh_token"])
+            self.assertEqual(list(Path(tmp_dir).glob(".tokens.json.*.tmp")), [])
+
 
 class AirPlusCloudDaemonMessageTests(unittest.TestCase):
     def test_cloud_daemon_update_includes_model_id(self):
