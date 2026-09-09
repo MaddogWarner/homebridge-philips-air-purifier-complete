@@ -6,6 +6,18 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- Home app scenes/automations that set the purifier to **Auto** no longer flip it back to a manual
+  speed. HomeKit replays every characteristic in a scene, including the `RotationSpeed` captured
+  when the scene was created; that speed write landed after `mode auto` and won. Speed writes that
+  arrive within 1.5 s of an AUTO `TargetAirPurifierState` write are now ignored (0%/power-off is
+  still honored).
+
+---
+
 ## [4.1.0] — 26/08/2026
 
 ### Added

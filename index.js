@@ -41,6 +41,10 @@ const LIGHT = {
   BRIGHT: 123,
 };
 
+// A scene/automation batch delivers TargetState and RotationSpeed within
+// well under a second; on AC1715 the slider debounce adds another 400 ms.
+const AUTO_SCENE_WINDOW_MS = 1500;
+
 // Map rotation speed percentage to mode
 const SPEED_TO_MODE = [
   { max: 33,  mode: 'sleep' },
@@ -772,6 +776,21 @@ class PhilipsAirPurifierAccessory {
         const isAuto = value === Characteristic.TargetAirPurifierState.AUTO;
         const mode = isAuto ? 'auto' : (ac1715 ? this.lastManualMode : 'medium');
         this.log.info(`[SET] TargetState: ${isAuto ? 'AUTO' : 'MANUAL'}`);
+        // Home app scenes/automations write every characteristic of the
+        // accessory in one batch, so an "Auto" scene also replays the
+        // RotationSpeed captured when it was created. Without this guard
+        // that speed write lands after `mode auto` and flips the device
+        // back to a manual mode. Remember the AUTO request so speed writes
+        // in the same batch are ignored (see suppressSpeedForAuto).
+        if (isAuto) {
+          this._autoRequestedAt = Date.now();
+          if (this._fanSpeedTimer) {
+            clearTimeout(this._fanSpeedTimer);
+            this._fanSpeedTimer = null;
+          }
+        } else {
+          this._autoRequestedAt = 0;
+        }
         if (!this.state.power) await this.executeCommand('power', ['on'], { power: true });
         if (ac1715) this.lastNonSleepMode = mode;
         await this.executeCommand('mode', [mode], { mode });
@@ -846,12 +865,14 @@ class PhilipsAirPurifierAccessory {
           ? (AC1715_MODE_TO_SPEED[this.lastManualMode] ?? 50)
           : 0)
         .onSet((value) => {
+          if (this.suppressSpeedForAuto(value)) return;
           // Debounce: the Home app streams writes while the slider is
           // dragged. Only act on the value it settles at.
           this._pendingFanSpeed = Number(value);
           if (this._fanSpeedTimer) clearTimeout(this._fanSpeedTimer);
           this._fanSpeedTimer = setTimeout(() => {
             this._fanSpeedTimer = null;
+            if (this.suppressSpeedForAuto(this._pendingFanSpeed)) return;
             applyFanSpeed(this._pendingFanSpeed).catch((err) => {
               this.log.error(`RotationSpeed apply failed: ${err.message}`);
             });
@@ -861,6 +882,7 @@ class PhilipsAirPurifierAccessory {
       rotationSpeed
         .onGet(() => MODE_TO_SPEED[this.state.mode] ?? 100)
         .onSet(async (value) => {
+          if (this.suppressSpeedForAuto(value)) return;
           this.log.info(`[SET] RotationSpeed: ${value}%`);
           if (value === 0) {
             await this.executeCommand('power', ['off'], { power: false });
@@ -1011,6 +1033,20 @@ class PhilipsAirPurifierAccessory {
 
   get commandLock() {
     return this._commandCount > 0;
+  }
+
+  /**
+   * True when a RotationSpeed write should be dropped because an AUTO
+   * TargetState write arrived moments ago from the same scene/automation
+   * batch. A user dragging the slider never writes TargetState first, so
+   * manual control is unaffected. A 0% write (power off) is always honored.
+   */
+  suppressSpeedForAuto(value) {
+    if (Number(value) === 0) return false;
+    if (!this._autoRequestedAt || Date.now() - this._autoRequestedAt > AUTO_SCENE_WINDOW_MS) return false;
+    this.log.info(`[SET] RotationSpeed: ${value}% ignored (AUTO requested by the same scene)`);
+    this.updatePurifierCharacteristics();
+    return true;
   }
 
   async executeCommand(cmd, args, optimisticState = {}) {
