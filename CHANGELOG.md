@@ -15,6 +15,11 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   when the scene was created; that speed write landed after `mode auto` and won. Speed writes that
   arrive within 1.5 s of an AUTO `TargetAirPurifierState` write are now ignored (0%/power-off is
   still honored).
+- Automations that turn the purifier **on and set a manual speed** in one step no longer end up in
+  Auto. Power-on and mode travel on different Air+ channels, so the mode landed while the device was
+  still starting and its power-on default (Auto) won. Mode writes are now held 1.5 s after a
+  power-on, and the plugin re-sends the requested mode once if the first status report after
+  power-on shows it did not stick.
 
 ---
 

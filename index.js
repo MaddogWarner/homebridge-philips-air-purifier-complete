@@ -45,6 +45,16 @@ const LIGHT = {
 // well under a second; on AC1715 the slider debounce adds another 400 ms.
 const AUTO_SCENE_WINDOW_MS = 1500;
 
+// A mode sent while the purifier is still powering on can be lost or
+// overridden by the device's power-on default (AC1715 wakes up in Auto).
+// Once the device reports power ON, re-send the requested mode if it did
+// not stick — but only for a power-on we initiated this recently.
+const POWER_ON_MODE_RETRY_MS = 60000;
+
+// Hold any mode write this long after a power-on so the device has finished
+// waking up before it sees the mode (the retry above is the backstop).
+const POWER_ON_SETTLE_MS = 1500;
+
 // Map rotation speed percentage to mode
 const SPEED_TO_MODE = [
   { max: 33,  mode: 'sleep' },
@@ -477,6 +487,8 @@ class PhilipsAirPurifierAccessory {
     this.lastNonSleepMode = 'auto';
     this._commandCount = 0;
     this._restartAttempt = 0;
+    this._powerOnSentAt = 0;
+    this._modeAfterPowerOn = null;
 
     // Model id persisted from a previous run; the airplus-cloud daemon
     // re-reports it on ready and on every update. Other protocols never
@@ -646,6 +658,8 @@ class PhilipsAirPurifierAccessory {
     this.lastPower = this.state.power;
     this.lastMode = this.state.mode;
     this.lastUpdateTime = Date.now();
+
+    this.reapplyModeAfterPowerOn();
 
     this.updatePurifierCharacteristics();
     this.updateLightCharacteristics();
@@ -1049,9 +1063,63 @@ class PhilipsAirPurifierAccessory {
     return true;
   }
 
+  /**
+   * Called from handleObserveUpdate once the device has reported a status.
+   * If we powered the device on and then asked for a mode before it had
+   * confirmed power ON, the mode may have been dropped or overridden by
+   * the device's power-on default (see POWER_ON_MODE_RETRY_MS). Re-send
+   * it once, only if the first status after power-on shows a different
+   * mode. Anything the device reports after that is left alone so we
+   * never fight a change made on the panel or in the Philips app.
+   */
+  reapplyModeAfterPowerOn() {
+    if (!this._powerOnSentAt) return;
+    const age = Date.now() - this._powerOnSentAt;
+    if (!this.state.power) {
+      if (age > POWER_ON_MODE_RETRY_MS) {
+        this._powerOnSentAt = 0;
+        this._modeAfterPowerOn = null;
+      }
+      return;
+    }
+    const mode = this._modeAfterPowerOn;
+    this._powerOnSentAt = 0;
+    this._modeAfterPowerOn = null;
+    if (!mode || age > POWER_ON_MODE_RETRY_MS || this.state.mode === mode) return;
+    this.log.info(`Device came up in ${this.state.mode}, re-sending requested mode ${mode}`);
+    if (this.isAC1715()) {
+      if (AC1715_MANUAL_MODES.has(mode)) this.lastManualMode = mode;
+      if (mode !== 'sleep') this.lastNonSleepMode = mode;
+    }
+    this.executeCommand('mode', [mode], { mode })
+      .then(() => {
+        this.updatePurifierCharacteristics();
+        if (this.isAC1715()) this.updateSleepCharacteristics();
+      })
+      .catch((err) => {
+        this.log.error(`Re-sending mode ${mode} after power-on failed: ${err.message}`);
+      });
+  }
+
   async executeCommand(cmd, args, optimisticState = {}) {
+    // A mode sent right after a power-on reaches a device that is still
+    // waking up (power-on and mode travel on different Air+ channels).
+    // Wait out POWER_ON_SETTLE_MS from the power-on before sending it.
+    // A status report confirming power ON clears _powerOnSentAt early.
+    if (cmd === 'mode' && this._powerOnSentAt) {
+      const wait = POWER_ON_SETTLE_MS - (Date.now() - this._powerOnSentAt);
+      if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+    }
     this._commandCount++;
     Object.assign(this.state, optimisticState);
+    // Track a power-on we initiated so reapplyModeAfterPowerOn can
+    // verify that a mode requested in the same batch actually stuck.
+    if (cmd === 'power') {
+      this._powerOnSentAt = args[0] === 'on' ? Date.now() : 0;
+      this._modeAfterPowerOn = null;
+    } else if (cmd === 'mode' && this._powerOnSentAt) {
+      this._modeAfterPowerOn = args[0];
+    }
     try {
       await this.daemon.execute(cmd, args);
       this.log.debug(`Command ${cmd} succeeded`);
@@ -1204,3 +1272,4 @@ class LegacyPlatformAccessory {
 }
 
 module.exports._DaemonHandler = DaemonHandler;
+module.exports._PhilipsAirPurifierAccessory = PhilipsAirPurifierAccessory;
