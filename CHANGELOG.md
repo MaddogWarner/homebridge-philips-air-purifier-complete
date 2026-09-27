@@ -10,6 +10,9 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- Air+ setup now accepts device identifiers returned as `id` as well as `uuid`, so devices
+  discovered after email/code login can be added without a missing UUID error. Device names,
+  model names, and device-list response shapes now match those supported by the Python setup.
 - Home app scenes/automations that set the purifier to **Auto** no longer flip it back to a manual
   speed. HomeKit replays every characteristic in a scene, including the `RotationSpeed` captured
   when the scene was created; that speed write landed after `mode auto` and won. Speed writes that
