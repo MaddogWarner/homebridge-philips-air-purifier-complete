@@ -487,6 +487,7 @@ class PhilipsAirPurifierAccessory {
     this.lastNonSleepMode = 'auto';
     this._commandCount = 0;
     this._restartAttempt = 0;
+    this._autoRequestedAt = 0;
     this._powerOnSentAt = 0;
     this._modeAfterPowerOn = null;
 
@@ -1052,8 +1053,8 @@ class PhilipsAirPurifierAccessory {
   /**
    * True when a RotationSpeed write should be dropped because an AUTO
    * TargetState write arrived moments ago from the same scene/automation
-   * batch. A user dragging the slider never writes TargetState first, so
-   * manual control is unaffected. A 0% write (power off) is always honored.
+   * batch. A manual slider write immediately after choosing Auto is also
+   * suppressed by this time window. A 0% write (power off) is always honored.
    */
   suppressSpeedForAuto(value) {
     if (Number(value) === 0) return false;
@@ -1102,15 +1103,17 @@ class PhilipsAirPurifierAccessory {
   }
 
   async executeCommand(cmd, args, optimisticState = {}) {
+    // Lock before waiting so an observe update during the settle delay
+    // cannot clear the power-on retry before we record the requested mode.
+    this._commandCount++;
     // A mode sent right after a power-on reaches a device that is still
     // waking up (power-on and mode travel on different Air+ channels).
     // Wait out POWER_ON_SETTLE_MS from the power-on before sending it.
-    // A status report confirming power ON clears _powerOnSentAt early.
+    // A power ON report received before this command avoids the hold.
     if (cmd === 'mode' && this._powerOnSentAt) {
       const wait = POWER_ON_SETTLE_MS - (Date.now() - this._powerOnSentAt);
       if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
     }
-    this._commandCount++;
     Object.assign(this.state, optimisticState);
     // Track a power-on we initiated so reapplyModeAfterPowerOn can
     // verify that a mode requested in the same batch actually stuck.

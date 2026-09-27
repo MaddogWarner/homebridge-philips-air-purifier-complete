@@ -22,17 +22,60 @@ function makeAccessory({ ac1715 = true } = {}) {
   acc.lastManualMode = 'medium';
   acc.lastNonSleepMode = 'auto';
   acc._commandCount = 0;
+  acc._autoRequestedAt = 0;
   acc._powerOnSentAt = 0;
   acc._modeAfterPowerOn = null;
   acc.daemon = { execute: async (cmd, args) => { acc.sent.push([cmd, ...args]); } };
   acc.isAC1715 = () => ac1715;
   acc.normalizeMode = (m) => m;
-  acc.updatePurifierCharacteristics = () => {};
+  acc.purifierUpdates = 0;
+  acc.updatePurifierCharacteristics = () => { acc.purifierUpdates++; };
   acc.updateLightCharacteristics = () => {};
   acc.updateAirQualityCharacteristics = () => {};
   acc.updateFilterCharacteristics = () => {};
   acc.updateSleepCharacteristics = () => {};
   return acc;
+}
+
+// Capture the actual onSet handlers so scene tests exercise both model
+// branches, including the AC1715 slider debounce.
+function wireModelControls(acc) {
+  const makeService = () => {
+    const characteristics = new Map();
+    return {
+      getCharacteristic(key) {
+        if (!characteristics.has(key)) {
+          characteristics.set(key, {
+            onGet() { return this; },
+            onSet(handler) { this.set = handler; return this; },
+            setProps(props) { this.props = props; return this; },
+          });
+        }
+        return characteristics.get(key);
+      },
+      setCharacteristic() { return this; },
+      addLinkedService() {},
+    };
+  };
+  acc.Service = { Switch: 'Switch', Lightbulb: 'Lightbulb' };
+  acc.Characteristic = {
+    TargetAirPurifierState: { AUTO: 1, MANUAL: 0 },
+    RotationSpeed: 'RotationSpeed',
+    On: 'On',
+    Name: 'Name',
+    Brightness: 'Brightness',
+  };
+  acc.purifierService = makeService();
+  acc.platformAcc = {
+    getService() {},
+    getServiceById() {},
+    addService: makeService,
+  };
+  acc.setupModelDependentServices();
+  return {
+    target: acc.purifierService.getCharacteristic(acc.Characteristic.TargetAirPurifierState),
+    speed: acc.purifierService.getCharacteristic(acc.Characteristic.RotationSpeed),
+  };
 }
 
 const status = (power, mode) => ({ power, mode, light_level: 0, child_lock: false, pm25: 3 });
@@ -69,7 +112,7 @@ test('a mode write goes out at once when no power-on preceded it', async () => {
   assert.deepEqual(acc.sent, [['mode', 'turbo']]);
 });
 
-test('a status confirming power ON releases the hold early', async (t) => {
+test('a power ON status received before a mode request avoids the hold', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1_000_000 });
   const acc = makeAccessory();
   await acc.executeCommand('power', ['on'], { power: true });
@@ -78,6 +121,87 @@ test('a status confirming power ON releases the hold early', async (t) => {
   await acc.executeCommand('mode', ['turbo'], { mode: 'turbo' });
   assert.deepEqual(acc.sent, [['power', 'on'], ['mode', 'turbo']]);
 });
+
+test('an observe update during the settle delay cannot disarm the mode retry', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1_000_000 });
+  const acc = makeAccessory();
+  await acc.executeCommand('power', ['on'], { power: true });
+  const pending = acc.executeCommand('mode', ['turbo'], { mode: 'turbo' });
+
+  // The power command's lock expires at 500 ms. The waiting mode must
+  // keep the lock until its send and cooldown have completed.
+  t.mock.timers.tick(750);
+  acc.handleObserveUpdate(status(true, 'auto'));
+  assert.equal(acc.commandLock, true);
+  assert.equal(acc._powerOnSentAt, 1_000_000);
+  assert.deepEqual(acc.sent, [['power', 'on']]);
+
+  t.mock.timers.tick(750);
+  await pending;
+  assert.equal(acc._modeAfterPowerOn, 'turbo');
+  t.mock.timers.tick(500);
+  assert.equal(acc.commandLock, false);
+
+  acc.handleObserveUpdate(status(true, 'auto'));
+  await tick();
+  assert.deepEqual(acc.sent, [['power', 'on'], ['mode', 'turbo'], ['mode', 'turbo']]);
+  assert.equal(acc.state.mode, 'turbo');
+
+  t.mock.timers.tick(500);
+  acc.handleObserveUpdate(status(true, 'auto'));
+  assert.equal(acc.sent.length, 3);
+});
+
+for (const ac1715 of [true, false]) {
+  const model = ac1715 ? 'AC1715' : 'generic model';
+
+  test(`${model}: AUTO suppresses a nonzero scene speed 100 ms later and refreshes HomeKit`, async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1_000_000 });
+    const acc = makeAccessory({ ac1715 });
+    acc.state.power = true;
+    const { target, speed } = wireModelControls(acc);
+    await target.set(acc.Characteristic.TargetAirPurifierState.AUTO);
+    const updates = acc.purifierUpdates;
+
+    t.mock.timers.tick(100);
+    await speed.set(100);
+    assert.equal(acc.purifierUpdates, updates + 1);
+    t.mock.timers.tick(400);
+    await tick();
+    assert.deepEqual(acc.sent, [['mode', 'auto']]);
+    assert.equal(acc.state.mode, 'auto');
+  });
+
+  test(`${model}: a speed write 2 seconds after AUTO applies normally`, async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1_000_000 });
+    const acc = makeAccessory({ ac1715 });
+    acc.state.power = true;
+    const { target, speed } = wireModelControls(acc);
+    await target.set(acc.Characteristic.TargetAirPurifierState.AUTO);
+
+    t.mock.timers.tick(2000);
+    await speed.set(100);
+    t.mock.timers.tick(400);
+    await tick();
+    assert.deepEqual(acc.sent, [['mode', 'auto'], ['mode', 'turbo']]);
+    assert.equal(acc.state.mode, 'turbo');
+  });
+
+  test(`${model}: a 0% speed write inside the AUTO window still powers off`, async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1_000_000 });
+    const acc = makeAccessory({ ac1715 });
+    acc.state.power = true;
+    const { target, speed } = wireModelControls(acc);
+    await target.set(acc.Characteristic.TargetAirPurifierState.AUTO);
+
+    t.mock.timers.tick(100);
+    await speed.set(0);
+    t.mock.timers.tick(400);
+    await tick();
+    assert.deepEqual(acc.sent, [['mode', 'auto'], ['power', 'off']]);
+    assert.equal(acc.state.power, false);
+  });
+}
 
 test('a mode requested during power-on is re-sent when the device wakes up in Auto', async () => {
   const acc = makeAccessory();

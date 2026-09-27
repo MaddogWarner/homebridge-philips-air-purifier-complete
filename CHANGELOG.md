@@ -14,12 +14,15 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   speed. HomeKit replays every characteristic in a scene, including the `RotationSpeed` captured
   when the scene was created; that speed write landed after `mode auto` and won. Speed writes that
   arrive within 1.5 s of an AUTO `TargetAirPurifierState` write are now ignored (0%/power-off is
-  still honored).
+  still honored). This timing guard also ignores a manual slider adjustment made within 1.5 s
+  of selecting Auto; wait for that window to pass before selecting a manual speed.
 - Automations that turn the purifier **on and set a manual speed** in one step no longer end up in
   Auto. Power-on and mode travel on different Air+ channels, so the mode landed while the device was
   still starting and its power-on default (Auto) won. Mode writes are now held 1.5 s after a
   power-on, and the plugin re-sends the requested mode once if the first status report after
   power-on shows it did not stick.
+- Keep the command lock active during the power-on settle delay so an incoming status update
+  cannot clear the pending mode retry before the mode command is sent.
 
 ---
 
