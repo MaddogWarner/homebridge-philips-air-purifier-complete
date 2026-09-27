@@ -48,7 +48,7 @@ function wireModelControls(acc, { cachedChildLock = false } = {}) {
       getCharacteristic(key) {
         if (!characteristics.has(key)) {
           characteristics.set(key, {
-            onGet() { return this; },
+            onGet(handler) { this.get = handler; return this; },
             onSet(handler) { this.set = handler; return this; },
             setProps(props) { this.props = props; return this; },
           });
@@ -94,6 +94,113 @@ function wireModelControls(acc, { cachedChildLock = false } = {}) {
 
 const status = (power, mode) => ({ power, mode, light_level: 0, child_lock: false, pm25: 3 });
 const tick = () => new Promise((resolve) => setImmediate(resolve));
+
+test('AC1715 LED switch follows local power changes without extra light commands', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1_000_000 });
+  const acc = makeAccessory();
+  wireModelControls(acc);
+  acc.updateLightCharacteristics = Accessory.prototype.updateLightCharacteristics;
+  acc.state.power = true;
+  acc.state.lightLevel = 123;
+  acc.lastLightLevel = 123;
+  const led = acc.lightService.getCharacteristic(acc.Characteristic.On);
+  acc.updateLightCharacteristics();
+  assert.equal(led.value, true);
+
+  await acc.executeCommand('power', ['off'], { power: false });
+  assert.equal(led.value, false);
+  assert.equal(led.get(), false);
+  assert.equal(acc.state.lightLevel, 123);
+  assert.equal(acc.lastLightLevel, 123);
+
+  await acc.executeCommand('power', ['on'], { power: true });
+  assert.equal(led.value, true);
+  assert.equal(led.get(), true);
+  assert.deepEqual(acc.sent, [['power', 'off'], ['power', 'on']]);
+});
+
+test('AC1715 LED switch stays off when an off device reports its remembered light level', () => {
+  const acc = makeAccessory();
+  wireModelControls(acc);
+  acc.updateLightCharacteristics = Accessory.prototype.updateLightCharacteristics;
+  const led = acc.lightService.getCharacteristic(acc.Characteristic.On);
+
+  acc.handleObserveUpdate({ ...status(false, 'auto'), light_level: 123 });
+  assert.equal(led.value, false);
+  assert.equal(led.get(), false);
+  acc.handleObserveUpdate({ ...status(true, 'auto'), light_level: 123 });
+  assert.equal(led.value, true);
+  assert.equal(led.get(), true);
+});
+
+test('powering AC1715 on uses the reported LED setting without forcing a light change', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1_000_000 });
+  const acc = makeAccessory();
+  wireModelControls(acc);
+  acc.updateLightCharacteristics = Accessory.prototype.updateLightCharacteristics;
+  await acc.executeCommand('power', ['on'], { power: true });
+  const led = acc.lightService.getCharacteristic(acc.Characteristic.On);
+  assert.equal(led.value, false);
+  assert.equal(led.get(), false);
+  assert.deepEqual(acc.sent, [['power', 'on']]);
+
+  // If the device enables its LED during startup, its report updates HomeKit.
+  t.mock.timers.tick(500);
+  acc.handleObserveUpdate({ ...status(true, 'auto'), light_level: 123 });
+  assert.equal(led.value, true);
+  assert.equal(led.get(), true);
+  assert.deepEqual(acc.sent, [['power', 'on']]);
+});
+
+test('a repeated power-on does not overwrite a manually disabled LED on a running AC1715', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1_000_000 });
+  const acc = makeAccessory();
+  wireModelControls(acc);
+  acc.updateLightCharacteristics = Accessory.prototype.updateLightCharacteristics;
+  acc.state.power = true;
+  acc.state.lightLevel = 0;
+  await acc.executeCommand('power', ['on'], { power: true });
+  const led = acc.lightService.getCharacteristic(acc.Characteristic.On);
+  assert.equal(led.value, false);
+  assert.equal(led.get(), false);
+});
+
+test('an explicit LED-off during power-on is preserved when the power command completes', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1_000_000 });
+  const acc = makeAccessory();
+  wireModelControls(acc);
+  acc.updateLightCharacteristics = Accessory.prototype.updateLightCharacteristics;
+  acc.state.lightLevel = 123;
+  let finishPowerOn;
+  acc.daemon.execute = (cmd, args) => {
+    acc.sent.push([cmd, ...args]);
+    if (cmd === 'power') return new Promise((resolve) => { finishPowerOn = resolve; });
+    return Promise.resolve();
+  };
+  const powerOn = acc.executeCommand('power', ['on'], { power: true });
+  const led = acc.lightService.getCharacteristic(acc.Characteristic.On);
+  await led.set(false);
+  finishPowerOn();
+  await powerOn;
+  assert.equal(led.value, false);
+  assert.equal(led.get(), false);
+  assert.deepEqual(acc.sent, [['power', 'on'], ['light', '0']]);
+});
+
+test('0% fan speed also refreshes the AC1715 LED switch to off', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1_000_000 });
+  const acc = makeAccessory();
+  const { speed } = wireModelControls(acc);
+  acc.updateLightCharacteristics = Accessory.prototype.updateLightCharacteristics;
+  acc.state.power = true;
+  acc.state.lightLevel = 123;
+  acc.updateLightCharacteristics();
+  await speed.set(0);
+  t.mock.timers.tick(400);
+  await tick();
+  assert.equal(acc.lightService.getCharacteristic(acc.Characteristic.On).value, false);
+  assert.deepEqual(acc.sent, [['power', 'off']]);
+});
 
 for (const modelId of ['AC1715/10', 'AC1715/11']) {
   test(`${modelId} removes cached child lock, does not restore it on update, and ignores writes`, async () => {

@@ -938,7 +938,7 @@ class PhilipsAirPurifierAccessory {
       this.lightService.displayName = 'Display Light';
       this.lightService.setCharacteristic(Characteristic.Name, 'Display Light');
       this.lightService.getCharacteristic(Characteristic.On)
-        .onGet(() => this.state.lightLevel > 0)
+        .onGet(() => this.state.power && this.state.lightLevel > 0)
         .onSet(async (value) => {
           const level = value ? LIGHT.BRIGHT : LIGHT.OFF;
           this.log.info(`[SET] Display Light: ${value ? 'ON' : 'OFF'}`);
@@ -1180,6 +1180,7 @@ class PhilipsAirPurifierAccessory {
     try {
       await this.daemon.execute(cmd, args);
       this.log.debug(`Command ${cmd} succeeded`);
+      if (cmd === 'power') this.updateLightCharacteristics();
     } catch (error) {
       this.log.error(`Command ${cmd} failed: ${error.message}`);
       throw new this.api.hap.HapStatusError(this.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
@@ -1221,7 +1222,9 @@ class PhilipsAirPurifierAccessory {
 
   updateLightCharacteristics() {
     const { Characteristic } = this;
-    this.lightService.updateCharacteristic(Characteristic.On, this.state.lightLevel > 0);
+    // The device can report its remembered light level while powered off.
+    const on = this.state.lightLevel > 0 && (!this.isAC1715() || this.state.power);
+    this.lightService.updateCharacteristic(Characteristic.On, on);
     if (this.isAC1715()) return; // on/off Switch has no Brightness
     let brightness = 100;
     if (this.state.lightLevel === LIGHT.OFF) brightness = 0;

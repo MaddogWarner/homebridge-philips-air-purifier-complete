@@ -10,6 +10,9 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- The AC1715 LED switch now shows off when the purifier is off, even when it reports a saved
+  nonzero light setting. Power commands refresh the switch immediately on success. Normal LED
+  startup behavior and manual settings are preserved without sending an extra light command.
 - AC1715 models no longer expose a child-lock control or send unsupported child-lock commands,
   including when a cached control or older scene still requests one.
 - Identical mode requests from an automation's TargetState and RotationSpeed now share one
