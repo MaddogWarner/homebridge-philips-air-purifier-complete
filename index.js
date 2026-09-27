@@ -486,6 +486,7 @@ class PhilipsAirPurifierAccessory {
     this.lastManualMode = 'medium';
     this.lastNonSleepMode = 'auto';
     this._commandCount = 0;
+    this._pendingCommands = new Map();
     this._restartAttempt = 0;
     this._autoRequestedAt = 0;
     this._powerOnSentAt = 0;
@@ -698,17 +699,6 @@ class PhilipsAirPurifierAccessory {
         ? Characteristic.CurrentAirPurifierState.PURIFYING_AIR
         : Characteristic.CurrentAirPurifierState.INACTIVE);
 
-    // Child Lock (LockPhysicalControls)
-    this.purifierService.getCharacteristic(Characteristic.LockPhysicalControls)
-      .onGet(() => this.state.childLock
-        ? Characteristic.LockPhysicalControls.CONTROL_LOCK_ENABLED
-        : Characteristic.LockPhysicalControls.CONTROL_LOCK_DISABLED)
-      .onSet(async (value) => {
-        const enabled = value === Characteristic.LockPhysicalControls.CONTROL_LOCK_ENABLED;
-        this.log.info(`[SET] ChildLock: ${enabled ? 'ENABLED' : 'DISABLED'}`);
-        await this.executeCommand('childlock', [enabled ? 'on' : 'off'], { childLock: enabled });
-      });
-
     // Air Quality Sensor
     this.airQualitySensor =
       this.platformAcc.getService(Service.AirQualitySensor) ||
@@ -775,13 +765,33 @@ class PhilipsAirPurifierAccessory {
    * is safe.
    *
    * AC1715: continuous fan slider mapping medium/fast/turbo, display
-   * light as a plain on/off switch (the panel has no dim level), sleep
+   * light as a plain on/off switch (the panel has no dim level), no child lock, sleep
    * off restores the last non-sleep mode. All other models: original
    * behavior, unchanged.
    */
   setupModelDependentServices() {
     const { Service, Characteristic } = this;
     const ac1715 = this.isAC1715();
+
+    // AC1715 has no child lock. Remove a cached characteristic as well as
+    // one exposed before the daemon identified the model on first setup.
+    if (ac1715) {
+      if (this.purifierService.testCharacteristic(Characteristic.LockPhysicalControls)) {
+        this.purifierService.removeCharacteristic(
+          this.purifierService.getCharacteristic(Characteristic.LockPhysicalControls)
+        );
+      }
+    } else {
+      this.purifierService.getCharacteristic(Characteristic.LockPhysicalControls)
+        .onGet(() => this.state.childLock
+          ? Characteristic.LockPhysicalControls.CONTROL_LOCK_ENABLED
+          : Characteristic.LockPhysicalControls.CONTROL_LOCK_DISABLED)
+        .onSet(async (value) => {
+          const enabled = value === Characteristic.LockPhysicalControls.CONTROL_LOCK_ENABLED;
+          this.log.info(`[SET] ChildLock: ${enabled ? 'ENABLED' : 'DISABLED'}`);
+          await this.executeCommand('childlock', [enabled ? 'on' : 'off'], { childLock: enabled });
+        });
+    }
 
     this.purifierService.getCharacteristic(Characteristic.TargetAirPurifierState)
       .onGet(() => this.state.mode === 'auto'
@@ -1103,6 +1113,50 @@ class PhilipsAirPurifierAccessory {
   }
 
   async executeCommand(cmd, args, optimisticState = {}) {
+    if (cmd === 'power') this._pendingCommands.delete('mode');
+    if (cmd !== 'mode' && cmd !== 'childlock') {
+      return this.sendCommand(cmd, args, optimisticState);
+    }
+
+    const pending = this._pendingCommands.get(cmd);
+    if (pending?.value === args[0]) {
+      this.log.debug(`Command ${cmd} ${args[0]} already pending; sharing result`);
+      return pending.promise;
+    }
+    // Keep mode requests pending through both the power-on delay and the
+    // daemon write. Scene TargetState and RotationSpeed can request the same
+    // mode before either has updated the optimistic state.
+    const command = { value: args[0] };
+    const send = async () => {
+      if (cmd === 'childlock' && this.isAC1715()) {
+        this.log.debug('Command childlock skipped (unsupported on AC1715)');
+        return;
+      }
+      if (cmd === 'childlock' && this.state.childLock === (args[0] === 'on')) {
+        this.log.debug(`Command childlock ${args[0]} skipped (no change)`);
+        return;
+      }
+      const priorChildLock = this.state.childLock;
+      try {
+        await this.sendCommand(cmd, args, optimisticState);
+      } catch (error) {
+        if (cmd === 'childlock') this.state.childLock = priorChildLock;
+        throw error;
+      }
+    };
+    // Queue opposite lock writes in request order. Check for an unchanged
+    // value only after earlier writes (including failure rollback) finish.
+    const result = cmd === 'childlock' && pending
+      ? pending.promise.catch(() => {}).then(send)
+      : send();
+    command.promise = result.finally(() => {
+      if (this._pendingCommands.get(cmd) === command) this._pendingCommands.delete(cmd);
+    });
+    this._pendingCommands.set(cmd, command);
+    return command.promise;
+  }
+
+  async sendCommand(cmd, args, optimisticState = {}) {
     // Lock before waiting so an observe update during the settle delay
     // cannot clear the power-on retry before we record the requested mode.
     this._commandCount++;
@@ -1155,12 +1209,14 @@ class PhilipsAirPurifierAccessory {
         ? (this.state.power ? (AC1715_MODE_TO_SPEED[this.lastManualMode] ?? 50) : 0)
         : (MODE_TO_SPEED[this.state.mode] ?? 100)
     );
-    this.purifierService.updateCharacteristic(
-      Characteristic.LockPhysicalControls,
-      this.state.childLock
-        ? Characteristic.LockPhysicalControls.CONTROL_LOCK_ENABLED
-        : Characteristic.LockPhysicalControls.CONTROL_LOCK_DISABLED
-    );
+    if (!this.isAC1715()) {
+      this.purifierService.updateCharacteristic(
+        Characteristic.LockPhysicalControls,
+        this.state.childLock
+          ? Characteristic.LockPhysicalControls.CONTROL_LOCK_ENABLED
+          : Characteristic.LockPhysicalControls.CONTROL_LOCK_DISABLED
+      );
+    }
   }
 
   updateLightCharacteristics() {

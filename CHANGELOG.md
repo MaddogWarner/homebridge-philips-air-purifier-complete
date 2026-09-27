@@ -10,6 +10,11 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- AC1715 models no longer expose a child-lock control or send unsupported child-lock commands,
+  including when a cached control or older scene still requests one.
+- Identical mode requests from an automation's TargetState and RotationSpeed now share one
+  pending command, including during power-on. Unchanged child-lock writes are skipped; failed
+  lock writes restore the cached state so subsequent requests can retry.
 - Air+ setup now accepts device identifiers returned as `id` as well as `uuid`, so devices
   discovered after email/code login can be added without a missing UUID error. Device names,
   model names, and device-list response shapes now match those supported by the Python setup.
