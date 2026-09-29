@@ -10,6 +10,9 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- OFF automations now keep the purifier off when HomeKit also replays saved manual mode and fan
+  speed values. Mode and nonzero speed writes in the same 1.5 s batch are ignored, and pending
+  slider or power-on mode writes are cancelled when OFF arrives.
 - The AC1715 LED switch now shows off when the purifier is off, even when it reports a saved
   nonzero light setting. Power commands refresh the switch immediately on success. Normal LED
   startup behavior and manual settings are preserved without sending an extra light command.

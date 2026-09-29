@@ -25,6 +25,8 @@ function makeAccessory({ ac1715 = true } = {}) {
   acc._pendingCommands = new Map();
   acc.api = { hap: { HapStatusError: Error, HAPStatus: { SERVICE_COMMUNICATION_FAILURE: 'communication failed' } } };
   acc._autoRequestedAt = 0;
+  acc._powerOffRequestedAt = 0;
+  acc._powerOffGeneration = 0;
   acc._powerOnSentAt = 0;
   acc._modeAfterPowerOn = null;
   acc.daemon = { execute: async (cmd, args) => { acc.sent.push([cmd, ...args]); } };
@@ -470,6 +472,58 @@ test('an observe update during the settle delay cannot disarm the mode retry', a
 for (const ac1715 of [true, false]) {
   const model = ac1715 ? 'AC1715' : 'generic model';
 
+  test(`${model}: OFF automation ignores replayed MANUAL and 100% speed`, async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1_000_000 });
+    const acc = makeAccessory({ ac1715 });
+    acc.state.power = true;
+    acc.state.mode = ac1715 ? 'fast' : 'medium';
+    const { target, speed } = wireModelControls(acc);
+    await acc.executeCommand('power', ['off'], { power: false });
+    await target.set(acc.Characteristic.TargetAirPurifierState.MANUAL);
+    t.mock.timers.tick(1000);
+    await speed.set(100);
+    t.mock.timers.tick(500);
+    await tick();
+
+    assert.deepEqual(acc.sent, [['power', 'off']]);
+    assert.equal(acc.state.power, false);
+    assert.equal(acc.state.mode, ac1715 ? 'fast' : 'medium');
+  });
+
+  test(`${model}: an explicit ON after OFF accepts a new manual speed`, async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1_000_000 });
+    const acc = makeAccessory({ ac1715 });
+    acc.state.power = true;
+    const { speed } = wireModelControls(acc);
+    await acc.executeCommand('power', ['off'], { power: false });
+    await acc.executeCommand('power', ['on'], { power: true });
+    acc._powerOnSentAt -= 1500;
+    await speed.set(100);
+    t.mock.timers.tick(400);
+    await tick();
+
+    assert.deepEqual(acc.sent, [['power', 'off'], ['power', 'on'], ['mode', 'turbo']]);
+    assert.equal(acc.state.power, true);
+  });
+
+  test(`${model}: a manual speed after the OFF scene window turns the purifier on`, async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1_000_000 });
+    const acc = makeAccessory({ ac1715 });
+    acc.state.power = true;
+    const { speed } = wireModelControls(acc);
+
+    await acc.executeCommand('power', ['off'], { power: false });
+    t.mock.timers.tick(1600);
+    const request = speed.set(100);
+    t.mock.timers.tick(400);
+    await tick();
+    t.mock.timers.tick(1500);
+    await request;
+    await tick();
+    assert.deepEqual(acc.sent, [['power', 'off'], ['power', 'on'], ['mode', 'turbo']]);
+    assert.equal(acc.state.power, true);
+  });
+
   test(`${model}: AUTO suppresses a nonzero scene speed 100 ms later and refreshes HomeKit`, async (t) => {
     t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1_000_000 });
     const acc = makeAccessory({ ac1715 });
@@ -517,6 +571,35 @@ for (const ac1715 of [true, false]) {
     assert.equal(acc.state.power, false);
   });
 }
+
+test('OFF cancels an AC1715 speed waiting in the slider debounce', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1_000_000 });
+  const acc = makeAccessory();
+  acc.state.power = true;
+  const { speed } = wireModelControls(acc);
+  await speed.set(100);
+  t.mock.timers.tick(200);
+  await acc.executeCommand('power', ['off'], { power: false });
+  t.mock.timers.tick(500);
+  await tick();
+
+  assert.deepEqual(acc.sent, [['power', 'off']]);
+});
+
+test('OFF cancels a mode waiting for power-on settle', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1_000_000 });
+  const acc = makeAccessory();
+  await acc.executeCommand('power', ['on'], { power: true });
+  const pending = acc.executeCommand('mode', ['turbo'], { mode: 'turbo' });
+  t.mock.timers.tick(500);
+  await acc.executeCommand('power', ['off'], { power: false });
+  t.mock.timers.tick(1000);
+  await pending;
+
+  assert.deepEqual(acc.sent, [['power', 'on'], ['power', 'off']]);
+  assert.equal(acc.state.power, false);
+  assert.equal(acc._modeAfterPowerOn, null);
+});
 
 test('a mode requested during power-on is re-sent when the device wakes up in Auto', async () => {
   const acc = makeAccessory();
