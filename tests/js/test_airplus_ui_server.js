@@ -119,7 +119,9 @@ const TOKEN_RESPONSE = {
 };
 
 /** Happy-path answers for the whole email + verification code flow. */
-function otpFlowResponder(overrides = {}) {
+function otpFlowResponder(overrides = {}, deviceResponse = {
+  devices: [{ uuid: 'device-uuid-1', name: 'Living Room', modelName: 'AC1715' }],
+}) {
   const tokenResponse = { ...TOKEN_RESPONSE, ...overrides };
   if (overrides.id_token === undefined && 'id_token' in overrides) delete tokenResponse.id_token;
 
@@ -165,9 +167,7 @@ function otpFlowResponder(overrides = {}) {
     if (call.hostname === API_HOST && call.path === '/api/da/user/self/device') {
       return {
         status: 200,
-        body: JSON.stringify({
-          devices: [{ uuid: 'device-uuid-1', name: 'Living Room', modelName: 'AC1715' }],
-        }),
+        body: JSON.stringify(deviceResponse),
       };
     }
     return null;
@@ -175,9 +175,9 @@ function otpFlowResponder(overrides = {}) {
 }
 
 /** Run the wizard's OTP flow against the fake and return the server plus recorded calls. */
-async function runOtpFlow(t, overrides) {
+async function runOtpFlow(t, overrides, deviceResponse) {
   const server = new AirPlusSetupServer();
-  const calls = fakeHttps(otpFlowResponder(overrides));
+  const calls = fakeHttps(otpFlowResponder(overrides, deviceResponse));
   t.after(() => calls.restore());
 
   await server.handleOtpSend({ email: 'user@example.com' });
@@ -253,6 +253,44 @@ test('the device list is returned to the wizard', async (t) => {
   assert.deepEqual(result.devices, [
     { uuid: 'device-uuid-1', name: 'Living Room', modelName: 'AC1715' },
   ]);
+});
+
+for (const [shape, wrap] of [
+  ['array', (devices) => devices],
+  ['devices', (devices) => ({ devices })],
+  ['data.items', (devices) => ({ data: { items: devices } })],
+  ['data array', (devices) => ({ data: devices })],
+  ['items', (devices) => ({ items: devices })],
+]) {
+  test(`an Air+ device returned with id in ${shape} can be added after OTP login`, async (t) => {
+    const home = fakeHome(t);
+    const { server, result } = await runOtpFlow(t, {}, wrap([{
+      id: 'device-id-1',
+      friendlyName: 'Bedroom',
+      ctn: 'AC1715/11',
+    }]));
+
+    assert.deepEqual(result.devices, [{
+      uuid: 'device-id-1', name: 'Bedroom', modelName: 'AC1715/11',
+    }]);
+    // Add Device forwards the identifier returned by discovery to /auth/save.
+    const saved = await server.routes['/auth/save'](result.devices[0]);
+    assert.equal(saved.uuid, 'device-id-1');
+    assert.equal(saved.name, 'Bedroom');
+    assert.equal(saved.tokenFile, path.join(home, '.homebridge', 'philips-airplus-device-id-1.json'));
+    assert.equal(fs.existsSync(saved.tokenFile), true);
+  });
+}
+
+test('existing device fields take precedence over Air+ aliases', async (t) => {
+  const { result } = await runOtpFlow(t, {}, { devices: [{
+    uuid: 'device-uuid-1', id: 'alternate-id',
+    name: 'Living Room', friendlyName: 'Alternate name',
+    modelName: 'AC1715', ctn: 'AC1715/11',
+  }] });
+  assert.deepEqual(result.devices, [{
+    uuid: 'device-uuid-1', name: 'Living Room', modelName: 'AC1715',
+  }]);
 });
 
 test('the saved token file carries the id_token the daemon needs', async (t) => {

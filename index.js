@@ -41,6 +41,21 @@ const LIGHT = {
   BRIGHT: 123,
 };
 
+// A scene/automation batch delivers TargetState and RotationSpeed within
+// well under a second; on AC1715 the slider debounce adds another 400 ms.
+const AUTO_SCENE_WINDOW_MS = 1500;
+const POWER_OFF_SCENE_WINDOW_MS = 1500;
+
+// A mode sent while the purifier is still powering on can be lost or
+// overridden by the device's power-on default (AC1715 wakes up in Auto).
+// Once the device reports power ON, re-send the requested mode if it did
+// not stick — but only for a power-on we initiated this recently.
+const POWER_ON_MODE_RETRY_MS = 60000;
+
+// Hold any mode write this long after a power-on so the device has finished
+// waking up before it sees the mode (the retry above is the backstop).
+const POWER_ON_SETTLE_MS = 1500;
+
 // Map rotation speed percentage to mode
 const SPEED_TO_MODE = [
   { max: 33,  mode: 'sleep' },
@@ -472,7 +487,13 @@ class PhilipsAirPurifierAccessory {
     this.lastManualMode = 'medium';
     this.lastNonSleepMode = 'auto';
     this._commandCount = 0;
+    this._pendingCommands = new Map();
     this._restartAttempt = 0;
+    this._autoRequestedAt = 0;
+    this._powerOffRequestedAt = 0;
+    this._powerOffGeneration = 0;
+    this._powerOnSentAt = 0;
+    this._modeAfterPowerOn = null;
 
     // Model id persisted from a previous run; the airplus-cloud daemon
     // re-reports it on ready and on every update. Other protocols never
@@ -643,6 +664,8 @@ class PhilipsAirPurifierAccessory {
     this.lastMode = this.state.mode;
     this.lastUpdateTime = Date.now();
 
+    this.reapplyModeAfterPowerOn();
+
     this.updatePurifierCharacteristics();
     this.updateLightCharacteristics();
     this.updateAirQualityCharacteristics();
@@ -678,17 +701,6 @@ class PhilipsAirPurifierAccessory {
       .onGet(() => this.state.power
         ? Characteristic.CurrentAirPurifierState.PURIFYING_AIR
         : Characteristic.CurrentAirPurifierState.INACTIVE);
-
-    // Child Lock (LockPhysicalControls)
-    this.purifierService.getCharacteristic(Characteristic.LockPhysicalControls)
-      .onGet(() => this.state.childLock
-        ? Characteristic.LockPhysicalControls.CONTROL_LOCK_ENABLED
-        : Characteristic.LockPhysicalControls.CONTROL_LOCK_DISABLED)
-      .onSet(async (value) => {
-        const enabled = value === Characteristic.LockPhysicalControls.CONTROL_LOCK_ENABLED;
-        this.log.info(`[SET] ChildLock: ${enabled ? 'ENABLED' : 'DISABLED'}`);
-        await this.executeCommand('childlock', [enabled ? 'on' : 'off'], { childLock: enabled });
-      });
 
     // Air Quality Sensor
     this.airQualitySensor =
@@ -756,13 +768,33 @@ class PhilipsAirPurifierAccessory {
    * is safe.
    *
    * AC1715: continuous fan slider mapping medium/fast/turbo, display
-   * light as a plain on/off switch (the panel has no dim level), sleep
+   * light as a plain on/off switch (the panel has no dim level), no child lock, sleep
    * off restores the last non-sleep mode. All other models: original
    * behavior, unchanged.
    */
   setupModelDependentServices() {
     const { Service, Characteristic } = this;
     const ac1715 = this.isAC1715();
+
+    // AC1715 has no child lock. Remove a cached characteristic as well as
+    // one exposed before the daemon identified the model on first setup.
+    if (ac1715) {
+      if (this.purifierService.testCharacteristic(Characteristic.LockPhysicalControls)) {
+        this.purifierService.removeCharacteristic(
+          this.purifierService.getCharacteristic(Characteristic.LockPhysicalControls)
+        );
+      }
+    } else {
+      this.purifierService.getCharacteristic(Characteristic.LockPhysicalControls)
+        .onGet(() => this.state.childLock
+          ? Characteristic.LockPhysicalControls.CONTROL_LOCK_ENABLED
+          : Characteristic.LockPhysicalControls.CONTROL_LOCK_DISABLED)
+        .onSet(async (value) => {
+          const enabled = value === Characteristic.LockPhysicalControls.CONTROL_LOCK_ENABLED;
+          this.log.info(`[SET] ChildLock: ${enabled ? 'ENABLED' : 'DISABLED'}`);
+          await this.executeCommand('childlock', [enabled ? 'on' : 'off'], { childLock: enabled });
+        });
+    }
 
     this.purifierService.getCharacteristic(Characteristic.TargetAirPurifierState)
       .onGet(() => this.state.mode === 'auto'
@@ -772,7 +804,25 @@ class PhilipsAirPurifierAccessory {
         const isAuto = value === Characteristic.TargetAirPurifierState.AUTO;
         const mode = isAuto ? 'auto' : (ac1715 ? this.lastManualMode : 'medium');
         this.log.info(`[SET] TargetState: ${isAuto ? 'AUTO' : 'MANUAL'}`);
+        if (this.suppressModeForPowerOff('TargetState')) return;
+        const powerOffGeneration = this._powerOffGeneration || 0;
+        // Home app scenes/automations write every characteristic of the
+        // accessory in one batch, so an "Auto" scene also replays the
+        // RotationSpeed captured when it was created. Without this guard
+        // that speed write lands after `mode auto` and flips the device
+        // back to a manual mode. Remember the AUTO request so speed writes
+        // in the same batch are ignored (see suppressSpeedForAuto).
+        if (isAuto) {
+          this._autoRequestedAt = Date.now();
+          if (this._fanSpeedTimer) {
+            clearTimeout(this._fanSpeedTimer);
+            this._fanSpeedTimer = null;
+          }
+        } else {
+          this._autoRequestedAt = 0;
+        }
         if (!this.state.power) await this.executeCommand('power', ['on'], { power: true });
+        if (powerOffGeneration !== (this._powerOffGeneration || 0)) return;
         if (ac1715) this.lastNonSleepMode = mode;
         await this.executeCommand('mode', [mode], { mode });
         this.updatePurifierCharacteristics();
@@ -806,6 +856,7 @@ class PhilipsAirPurifierAccessory {
           lastManualMode: this.lastManualMode,
           lastNonSleepMode: this.lastNonSleepMode,
         };
+        const powerOffGeneration = this._powerOffGeneration || 0;
         try {
           if (speed === 0) {
             this.log.info('[SET] RotationSpeed: 0% -> POWER OFF');
@@ -826,6 +877,7 @@ class PhilipsAirPurifierAccessory {
 
           this.log.info(`[SET] RotationSpeed: ${speed}% -> ${mode.toUpperCase()}`);
           if (!this.state.power) await this.executeCommand('power', ['on'], { power: true });
+          if (powerOffGeneration !== (this._powerOffGeneration || 0)) return;
           this.lastManualMode = mode;
           this.lastNonSleepMode = mode;
           await this.executeCommand('mode', [mode], { mode });
@@ -846,12 +898,16 @@ class PhilipsAirPurifierAccessory {
           ? (AC1715_MODE_TO_SPEED[this.lastManualMode] ?? 50)
           : 0)
         .onSet((value) => {
+          if (Number(value) !== 0 && this.suppressModeForPowerOff('RotationSpeed')) return;
+          if (this.suppressSpeedForAuto(value)) return;
           // Debounce: the Home app streams writes while the slider is
           // dragged. Only act on the value it settles at.
           this._pendingFanSpeed = Number(value);
           if (this._fanSpeedTimer) clearTimeout(this._fanSpeedTimer);
           this._fanSpeedTimer = setTimeout(() => {
             this._fanSpeedTimer = null;
+            if (this._pendingFanSpeed !== 0 && this.suppressModeForPowerOff('RotationSpeed')) return;
+            if (this.suppressSpeedForAuto(this._pendingFanSpeed)) return;
             applyFanSpeed(this._pendingFanSpeed).catch((err) => {
               this.log.error(`RotationSpeed apply failed: ${err.message}`);
             });
@@ -861,11 +917,15 @@ class PhilipsAirPurifierAccessory {
       rotationSpeed
         .onGet(() => MODE_TO_SPEED[this.state.mode] ?? 100)
         .onSet(async (value) => {
+          if (Number(value) !== 0 && this.suppressModeForPowerOff('RotationSpeed')) return;
+          if (this.suppressSpeedForAuto(value)) return;
           this.log.info(`[SET] RotationSpeed: ${value}%`);
           if (value === 0) {
             await this.executeCommand('power', ['off'], { power: false });
           } else {
+            const powerOffGeneration = this._powerOffGeneration || 0;
             if (!this.state.power) await this.executeCommand('power', ['on'], { power: true });
+            if (powerOffGeneration !== (this._powerOffGeneration || 0)) return;
             const entry = SPEED_TO_MODE.find(({ max }) => value <= max);
             const mode = entry ? entry.mode : 'medium';
             await this.executeCommand('mode', [mode], { mode });
@@ -891,7 +951,7 @@ class PhilipsAirPurifierAccessory {
       this.lightService.displayName = 'Display Light';
       this.lightService.setCharacteristic(Characteristic.Name, 'Display Light');
       this.lightService.getCharacteristic(Characteristic.On)
-        .onGet(() => this.state.lightLevel > 0)
+        .onGet(() => this.state.power && this.state.lightLevel > 0)
         .onSet(async (value) => {
           const level = value ? LIGHT.BRIGHT : LIGHT.OFF;
           this.log.info(`[SET] Display Light: ${value ? 'ON' : 'OFF'}`);
@@ -1013,12 +1073,155 @@ class PhilipsAirPurifierAccessory {
     return this._commandCount > 0;
   }
 
+  /**
+   * True when a RotationSpeed write should be dropped because an AUTO
+   * TargetState write arrived moments ago from the same scene/automation
+   * batch. A manual slider write immediately after choosing Auto is also
+   * suppressed by this time window. A 0% write (power off) is always honored.
+   */
+  suppressSpeedForAuto(value) {
+    if (Number(value) === 0) return false;
+    if (!this._autoRequestedAt || Date.now() - this._autoRequestedAt > AUTO_SCENE_WINDOW_MS) return false;
+    this.log.info(`[SET] RotationSpeed: ${value}% ignored (AUTO requested by the same scene)`);
+    this.updatePurifierCharacteristics();
+    return true;
+  }
+
+  // HomeKit can replay a saved mode and speed just after Active=OFF.
+  // Those writes describe the scene's old running state, so keep OFF as
+  // the intent for this short batch. A later explicit Active=ON clears it.
+  suppressModeForPowerOff(source) {
+    if (!this._powerOffRequestedAt || Date.now() - this._powerOffRequestedAt > POWER_OFF_SCENE_WINDOW_MS) return false;
+    this.log.info(`[SET] ${source} ignored (power OFF requested by the same scene)`);
+    this.updatePurifierCharacteristics();
+    return true;
+  }
+
+  /**
+   * Called from handleObserveUpdate once the device has reported a status.
+   * If we powered the device on and then asked for a mode before it had
+   * confirmed power ON, the mode may have been dropped or overridden by
+   * the device's power-on default (see POWER_ON_MODE_RETRY_MS). Re-send
+   * it once, only if the first status after power-on shows a different
+   * mode. Anything the device reports after that is left alone so we
+   * never fight a change made on the panel or in the Philips app.
+   */
+  reapplyModeAfterPowerOn() {
+    if (!this._powerOnSentAt) return;
+    const age = Date.now() - this._powerOnSentAt;
+    if (!this.state.power) {
+      if (age > POWER_ON_MODE_RETRY_MS) {
+        this._powerOnSentAt = 0;
+        this._modeAfterPowerOn = null;
+      }
+      return;
+    }
+    const mode = this._modeAfterPowerOn;
+    this._powerOnSentAt = 0;
+    this._modeAfterPowerOn = null;
+    if (!mode || age > POWER_ON_MODE_RETRY_MS || this.state.mode === mode) return;
+    this.log.info(`Device came up in ${this.state.mode}, re-sending requested mode ${mode}`);
+    if (this.isAC1715()) {
+      if (AC1715_MANUAL_MODES.has(mode)) this.lastManualMode = mode;
+      if (mode !== 'sleep') this.lastNonSleepMode = mode;
+    }
+    this.executeCommand('mode', [mode], { mode })
+      .then(() => {
+        this.updatePurifierCharacteristics();
+        if (this.isAC1715()) this.updateSleepCharacteristics();
+      })
+      .catch((err) => {
+        this.log.error(`Re-sending mode ${mode} after power-on failed: ${err.message}`);
+      });
+  }
+
   async executeCommand(cmd, args, optimisticState = {}) {
+    if (cmd === 'power') {
+      if (args[0] === 'off') {
+        this._powerOffRequestedAt = Date.now();
+        this._powerOffGeneration = (this._powerOffGeneration || 0) + 1;
+        if (this._fanSpeedTimer) {
+          clearTimeout(this._fanSpeedTimer);
+          this._fanSpeedTimer = null;
+        }
+      } else {
+        this._powerOffRequestedAt = 0;
+      }
+    }
+    if (cmd === 'power') this._pendingCommands.delete('mode');
+    if (cmd !== 'mode' && cmd !== 'childlock') {
+      return this.sendCommand(cmd, args, optimisticState);
+    }
+
+    const pending = this._pendingCommands.get(cmd);
+    if (pending?.value === args[0]) {
+      this.log.debug(`Command ${cmd} ${args[0]} already pending; sharing result`);
+      return pending.promise;
+    }
+    // Keep mode requests pending through both the power-on delay and the
+    // daemon write. Scene TargetState and RotationSpeed can request the same
+    // mode before either has updated the optimistic state.
+    const command = { value: args[0] };
+    const send = async () => {
+      if (cmd === 'childlock' && this.isAC1715()) {
+        this.log.debug('Command childlock skipped (unsupported on AC1715)');
+        return;
+      }
+      if (cmd === 'childlock' && this.state.childLock === (args[0] === 'on')) {
+        this.log.debug(`Command childlock ${args[0]} skipped (no change)`);
+        return;
+      }
+      const priorChildLock = this.state.childLock;
+      try {
+        await this.sendCommand(cmd, args, optimisticState);
+      } catch (error) {
+        if (cmd === 'childlock') this.state.childLock = priorChildLock;
+        throw error;
+      }
+    };
+    // Queue opposite lock writes in request order. Check for an unchanged
+    // value only after earlier writes (including failure rollback) finish.
+    const result = cmd === 'childlock' && pending
+      ? pending.promise.catch(() => {}).then(send)
+      : send();
+    command.promise = result.finally(() => {
+      if (this._pendingCommands.get(cmd) === command) this._pendingCommands.delete(cmd);
+    });
+    this._pendingCommands.set(cmd, command);
+    return command.promise;
+  }
+
+  async sendCommand(cmd, args, optimisticState = {}) {
+    // Lock before waiting so an observe update during the settle delay
+    // cannot clear the power-on retry before we record the requested mode.
     this._commandCount++;
+    const powerOffGeneration = this._powerOffGeneration || 0;
+    // A mode sent right after a power-on reaches a device that is still
+    // waking up (power-on and mode travel on different Air+ channels).
+    // Wait out POWER_ON_SETTLE_MS from the power-on before sending it.
+    // A power ON report received before this command avoids the hold.
+    if (cmd === 'mode' && this._powerOnSentAt) {
+      const wait = POWER_ON_SETTLE_MS - (Date.now() - this._powerOnSentAt);
+      if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+    }
+    if (cmd === 'mode' && powerOffGeneration !== (this._powerOffGeneration || 0)) {
+      this.log.debug(`Command mode ${args[0]} cancelled after power OFF`);
+      setTimeout(() => { this._commandCount = Math.max(0, this._commandCount - 1); }, 500);
+      return;
+    }
     Object.assign(this.state, optimisticState);
+    // Track a power-on we initiated so reapplyModeAfterPowerOn can
+    // verify that a mode requested in the same batch actually stuck.
+    if (cmd === 'power') {
+      this._powerOnSentAt = args[0] === 'on' ? Date.now() : 0;
+      this._modeAfterPowerOn = null;
+    } else if (cmd === 'mode' && this._powerOnSentAt) {
+      this._modeAfterPowerOn = args[0];
+    }
     try {
       await this.daemon.execute(cmd, args);
       this.log.debug(`Command ${cmd} succeeded`);
+      if (cmd === 'power') this.updateLightCharacteristics();
     } catch (error) {
       this.log.error(`Command ${cmd} failed: ${error.message}`);
       throw new this.api.hap.HapStatusError(this.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
@@ -1048,17 +1251,21 @@ class PhilipsAirPurifierAccessory {
         ? (this.state.power ? (AC1715_MODE_TO_SPEED[this.lastManualMode] ?? 50) : 0)
         : (MODE_TO_SPEED[this.state.mode] ?? 100)
     );
-    this.purifierService.updateCharacteristic(
-      Characteristic.LockPhysicalControls,
-      this.state.childLock
-        ? Characteristic.LockPhysicalControls.CONTROL_LOCK_ENABLED
-        : Characteristic.LockPhysicalControls.CONTROL_LOCK_DISABLED
-    );
+    if (!this.isAC1715()) {
+      this.purifierService.updateCharacteristic(
+        Characteristic.LockPhysicalControls,
+        this.state.childLock
+          ? Characteristic.LockPhysicalControls.CONTROL_LOCK_ENABLED
+          : Characteristic.LockPhysicalControls.CONTROL_LOCK_DISABLED
+      );
+    }
   }
 
   updateLightCharacteristics() {
     const { Characteristic } = this;
-    this.lightService.updateCharacteristic(Characteristic.On, this.state.lightLevel > 0);
+    // The device can report its remembered light level while powered off.
+    const on = this.state.lightLevel > 0 && (!this.isAC1715() || this.state.power);
+    this.lightService.updateCharacteristic(Characteristic.On, on);
     if (this.isAC1715()) return; // on/off Switch has no Brightness
     let brightness = 100;
     if (this.state.lightLevel === LIGHT.OFF) brightness = 0;
@@ -1168,3 +1375,4 @@ class LegacyPlatformAccessory {
 }
 
 module.exports._DaemonHandler = DaemonHandler;
+module.exports._PhilipsAirPurifierAccessory = PhilipsAirPurifierAccessory;
