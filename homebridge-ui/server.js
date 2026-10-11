@@ -345,21 +345,21 @@ class AirPlusSetupServer extends HomebridgePluginUiServer {
       },
     });
 
-    let rawDevices;
-    if (Array.isArray(deviceResponse)) {
-      rawDevices = deviceResponse;
-    } else if (deviceResponse.devices) {
-      rawDevices = deviceResponse.devices;
-    } else if (deviceResponse.data && deviceResponse.data.items) {
-      rawDevices = deviceResponse.data.items;
-    } else {
-      rawDevices = [];
-    }
+    // Match the response shapes and field aliases accepted by the Python
+    // setup/runtime. Air+ can return the device identifier as `id`; the
+    // wizard's Add Device button always consumes the normalized `uuid`.
+    const rawDevices = [
+      deviceResponse,
+      deviceResponse?.devices,
+      deviceResponse?.data?.items,
+      deviceResponse?.data,
+      deviceResponse?.items,
+    ].find(Array.isArray) || [];
 
     const devices = rawDevices.map((d) => ({
-      uuid: d.uuid,
-      name: d.name,
-      modelName: d.modelName,
+      uuid: d.uuid || d.id,
+      name: d.name || d.friendlyName,
+      modelName: d.modelName || d.ctn || d.modelId || d.type || d.deviceType,
     }));
 
     return { devices };
