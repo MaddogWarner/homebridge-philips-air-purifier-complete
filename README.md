@@ -16,6 +16,8 @@ This plugin bundles the [aioairctrl](https://github.com/betaboon/aioairctrl) CoA
 
 ---
 
+For security reporting and known protocol limitations, see [SECURITY.md](SECURITY.md).
+
 ## Features
 
 - **Power On/Off** — Turn your air purifier on or off

@@ -219,8 +219,8 @@ class AirPlusSetupServer extends HomebridgePluginUiServer {
 
   async handleSave(payload = {}) {
     const { uuid, name } = payload;
-    if (!uuid) {
-      throw new Error('Device UUID is required');
+    if (typeof uuid !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(uuid) || /\s/.test(uuid)) {
+      throw new Error('Device UUID must contain 1-128 letters, digits, underscores or hyphens');
     }
     if (!this._tokens) {
       throw new Error('No Air+ token is available. Complete the login flow first.');

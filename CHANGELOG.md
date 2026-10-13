@@ -6,6 +6,22 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [4.1.1] - 2026-10-14
+
+### Security
+
+- Token files are created owner-only from the start; device IDs are validated before use in file paths.
+
+### Fixed
+
+- Writing to the background daemon after it exits no longer risks an unhandled error.
+
+### Added
+
+- SECURITY.md.
+
+---
+
 ## [4.1.0] — 26/08/2026
 
 ### Added

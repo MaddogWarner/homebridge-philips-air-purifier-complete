@@ -252,6 +252,10 @@ class DaemonHandler {
         },
       });
 
+      this.daemon.stdin.on('error', (err) => {
+        this.log.debug(`Daemon stdin error: ${err.message}`);
+      });
+
       this.daemon.on('error', (err) => {
         this.log.error(`Daemon process error: ${err.message}`);
         this.connected = false;
@@ -375,7 +379,7 @@ class DaemonHandler {
   }
 
   async execute(cmd, args = []) {
-    if (!this.daemon) throw new Error('Daemon not running');
+    if (!this.daemon || !this.daemon.stdin.writable) throw new Error('Daemon not running');
 
     return new Promise((resolve, reject) => {
       const id = ++this.requestId;
