@@ -37,6 +37,19 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   power-on shows it did not stick.
 - Keep the command lock active during the power-on settle delay so an incoming status update
   cannot clear the pending mode retry before the mode command is sent.
+## [4.1.1] - 2026-10-14
+
+### Security
+
+- Token files are created owner-only from the start; device IDs are validated before use in file paths.
+
+### Fixed
+
+- Writing to the background daemon after it exits no longer risks an unhandled error.
+
+### Added
+
+- SECURITY.md.
 
 ---
 

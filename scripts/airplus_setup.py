@@ -274,6 +274,8 @@ def _get_gmid_ticket() -> str:
 
 def _save_tokens(uuid: str, access_token: str, refresh_token: str, id_token: str, expires_at: float) -> str:
     """Save token file to ~/.homebridge/philips-airplus-{uuid}.json with 0o600 permissions."""
+    if not isinstance(uuid, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", uuid):
+        raise ValueError("Device UUID must contain 1-128 letters, digits, underscores or hyphens")
     homebridge_dir = os.path.join(os.path.expanduser("~"), ".homebridge")
     os.makedirs(homebridge_dir, exist_ok=True)
     token_path = os.path.join(homebridge_dir, f"philips-airplus-{uuid}.json")
@@ -284,12 +286,15 @@ def _save_tokens(uuid: str, access_token: str, refresh_token: str, id_token: str
         "client_id": CLIENT_ID,
         "expires_at": expires_at,
     }
-    tmp_path = token_path + ".tmp"
-    with open(tmp_path, "w") as f:
-        json.dump(payload, f, indent=2)
-    os.chmod(tmp_path, 0o600)
-    os.replace(tmp_path, token_path)
-    os.chmod(token_path, 0o600)
+    tmp_path = token_path + "." + secrets.token_hex(16) + ".tmp"
+    fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(payload, f, indent=2)
+        os.replace(tmp_path, token_path)
+    finally:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
     return token_path
 
 
