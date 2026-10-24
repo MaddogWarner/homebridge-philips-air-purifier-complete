@@ -325,3 +325,35 @@ test('a token response without an id_token fails before anything is saved', asyn
     assert.equal(fs.existsSync(path.join(home, '.homebridge')), false);
   }
 });
+
+test('a token response without a valid refresh_token fails before anything is saved', async (t) => {
+  const home = fakeHome(t);
+  for (const badToken of [undefined, null, '', '   ', 123]) {
+    const server = new AirPlusSetupServer();
+    const calls = fakeHttps(otpFlowResponder({ refresh_token: badToken }));
+    try {
+      await server.handleOtpSend({ email: 'user@example.com' });
+      await assert.rejects(server.handleOtpVerify({ code: '123456' }), /No refresh_token in token response/);
+      assert.equal(server._tokens, null);
+      await assert.rejects(server.handleSave({ uuid: 'device-uuid-1' }), /token/);
+      assert.equal(fs.existsSync(path.join(home, '.homebridge')), false);
+    } finally {
+      calls.restore();
+    }
+  }
+});
+
+test('save rejects incomplete stored refresh tokens and preserves an existing token file', async (t) => {
+  const home = fakeHome(t);
+  const directory = path.join(home, '.homebridge');
+  fs.mkdirSync(directory);
+  const tokenPath = path.join(directory, 'philips-airplus-device-uuid-1.json');
+  fs.writeFileSync(tokenPath, 'existing token file', { mode: 0o600 });
+  const server = new AirPlusSetupServer();
+  for (const badToken of [undefined, null, '', '   ', 123]) {
+    server._tokens = { ...TOKEN_RESPONSE, refresh_token: badToken };
+    await assert.rejects(server.handleSave({ uuid: 'device-uuid-1' }), /no refresh_token/);
+    assert.equal(fs.readFileSync(tokenPath, 'utf8'), 'existing token file');
+    assert.deepEqual(fs.readdirSync(directory), [path.basename(tokenPath)]);
+  }
+});
