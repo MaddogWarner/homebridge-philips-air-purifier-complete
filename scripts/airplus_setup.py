@@ -430,6 +430,14 @@ def _save_selected_device(token_resp: dict) -> int:
         )
         return 1
 
+    if not isinstance(refresh_token, str) or not refresh_token.strip():
+        print(
+            "ERROR: No refresh_token in token response; Air+ token renewal cannot continue. "
+            "Log in again to obtain a complete token.",
+            file=sys.stderr,
+        )
+        return 1
+
     print("Token acquired successfully.")
 
     # Step 6: Fetch device list
@@ -473,7 +481,7 @@ def _save_selected_device(token_resp: dict) -> int:
     uuid = uuid.strip()
 
     # Step 8: Save tokens
-    token_path = _save_tokens(uuid, access_token, refresh_token or "", id_token, expires_at)
+    token_path = _save_tokens(uuid, access_token, refresh_token, id_token, expires_at)
     print(f"\nTokens saved to: {token_path}")
     print("File permissions set to 0600 (owner read/write only).")
 

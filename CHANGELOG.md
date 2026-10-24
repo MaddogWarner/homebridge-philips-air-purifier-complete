@@ -10,6 +10,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- Air+ setup rejects missing or empty refresh tokens before saving a token file and asks the user to log in again.
+
 - OFF automations now keep the purifier off when HomeKit also replays saved manual mode and fan
   speed values. Mode and nonzero speed writes in the same 1.5 s batch are ignored, and pending
   slider or power-on mode writes are cancelled when OFF arrives.

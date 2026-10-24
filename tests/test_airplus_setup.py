@@ -17,6 +17,34 @@ from scripts import airplus_setup  # noqa: E402
 
 
 class AirPlusSetupTests(unittest.TestCase):
+    def test_missing_or_empty_refresh_token_fails_before_device_lookup_or_save(self):
+        for refresh_token in (None, "", "   ", 123):
+            token_response = {"access_token": "access-token", "id_token": "identity-token"}
+            if refresh_token is not None:
+                token_response["refresh_token"] = refresh_token
+            error_output = io.StringIO()
+            with self.subTest(refresh_token=refresh_token):
+                with mock.patch.object(airplus_setup, "_save_tokens") as save_tokens:
+                    with mock.patch.object(airplus_setup, "_api_get") as api_get:
+                        with redirect_stderr(error_output):
+                            result = airplus_setup._save_selected_device(token_response)
+                self.assertEqual(result, 1)
+                save_tokens.assert_not_called()
+                api_get.assert_not_called()
+                self.assertIn("No refresh_token in token response", error_output.getvalue())
+                self.assertIn("Log in again", error_output.getvalue())
+
+    def test_valid_refresh_token_is_saved_unchanged(self):
+        token_response = {
+            "access_token": "access-token", "refresh_token": "refresh-token",
+            "id_token": "identity-token", "expires_in": 3600,
+        }
+        with mock.patch.object(airplus_setup, "_api_get", return_value=[{"uuid": "device-1"}]):
+            with mock.patch("builtins.input", return_value="1"):
+                with mock.patch.object(airplus_setup, "_save_tokens", return_value="/tmp/token.json") as save:
+                    self.assertEqual(airplus_setup._save_selected_device(token_response), 0)
+        self.assertEqual(save.call_args.args[:4], ("device-1", "access-token", "refresh-token", "identity-token"))
+
     def test_missing_or_empty_id_token_fails_before_writing_token_file(self):
         for id_token in (None, ""):
             token_response = {

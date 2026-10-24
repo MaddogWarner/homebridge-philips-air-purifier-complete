@@ -234,9 +234,15 @@ class AirPlusSetupServer extends HomebridgePluginUiServer {
         'Log in again to obtain a complete token.'
       );
     }
+    if (typeof refresh_token !== 'string' || !refresh_token.trim()) {
+      throw new Error(
+        'The stored Air+ token has no refresh_token; Air+ token renewal cannot continue. ' +
+        'Log in again to obtain a complete token.'
+      );
+    }
     const tokenData = {
       access_token,
-      refresh_token: refresh_token || '',
+      refresh_token,
       id_token,
       client_id: CLIENT_ID,
       expires_at: Date.now() / 1000 + (expires_in || 3600),
@@ -329,6 +335,12 @@ class AirPlusSetupServer extends HomebridgePluginUiServer {
       throw new Error(
         'No id_token in token response; Air+ MQTT setup cannot continue. ' +
         'Log in again, and if it keeps happening use scripts/airplus_setup.py.'
+      );
+    }
+    if (typeof refresh_token !== 'string' || !refresh_token.trim()) {
+      throw new Error(
+        'No refresh_token in token response; Air+ token renewal cannot continue. ' +
+        'Log in again to obtain a complete token.'
       );
     }
     this._tokens = { access_token, refresh_token, id_token, expires_in };
