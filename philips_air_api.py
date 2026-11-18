@@ -109,6 +109,7 @@ MODE_VALUES = {
     "medium": MODE_MEDIUM,
     "turbo": MODE_TURBO,
 }
+COAP_MODE_NAMES = {value: name for name, value in MODE_VALUES.items()}
 
 AC1715_MODE_NAMES = {
     0: "auto",
@@ -306,6 +307,8 @@ def _as_number(value: Any, default: Any = None) -> Any:
 def _normalise_mode(
     status: Dict[str, Any],
     model_id: Optional[str] = None,
+    *,
+    protocol: Optional[str] = None,
 ) -> tuple[Any, str]:
     mode_value = _first_value(
         status,
@@ -315,6 +318,8 @@ def _normalise_mode(
     )
 
     if isinstance(mode_value, int):
+        if protocol == "coap":
+            return mode_value, COAP_MODE_NAMES.get(mode_value, "unknown")
         if _is_ac1715_model(model_id):
             return mode_value, AC1715_MODE_NAMES.get(
                 mode_value,
@@ -375,6 +380,8 @@ def _normalise_light(
 def parse_status(
     raw: Dict[str, Any],
     model_id: Optional[str] = None,
+    *,
+    protocol: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Parse raw device status into normalised sensor data."""
     # Normalise Air+ MQTT power field: D0310D → D03102 (same semantics)
@@ -390,7 +397,7 @@ def parse_status(
     cleanup_time_until_next = status.get("D0520D", cleanup_max_interval)
     cleanup_percent = (cleanup_time_until_next / cleanup_max_interval * 100) if cleanup_max_interval > 0 else 0
 
-    mode_value, mode_name = _normalise_mode(status, model_id)
+    mode_value, mode_name = _normalise_mode(status, model_id, protocol=protocol)
 
     return {
         "power": _as_bool(_first_value(status, PARAM_POWER, "pwr", default=0)),
@@ -1343,7 +1350,7 @@ class ObserveDaemon:
                                 break
                             self._cached_state = status
                             self._last_update = time.time()
-                            sensors = parse_status(status)
+                            sensors = parse_status(status, protocol="coap")
                             _emit({
                                 "type": "update",
                                 "data": sensors,
@@ -1473,10 +1480,10 @@ class ObserveDaemon:
         """Execute a command."""
         if cmd == "sensors":
             if self._cached_state:
-                return parse_status(self._cached_state)
+                return parse_status(self._cached_state, protocol="coap")
             for _ in range(50):
                 if self._cached_state:
-                    return parse_status(self._cached_state)
+                    return parse_status(self._cached_state, protocol="coap")
                 await asyncio.sleep(0.1)
             raise Exception("No state available yet - waiting for device")
         elif cmd == "status":
@@ -1500,7 +1507,7 @@ class ObserveDaemon:
                 return {"mode": mode}
             elif self._cached_state:
                 mode_val = self._cached_state.get(PARAM_MODE, 0)
-                return {"mode": MODE_NAMES.get(mode_val, "unknown")}
+                return {"mode": COAP_MODE_NAMES.get(mode_val, "unknown")}
             raise Exception("No state available")
         elif cmd == "light":
             if args:
@@ -2167,7 +2174,7 @@ class PhilipsAirPurifier:
 
     async def get_sensors(self) -> Dict[str, Any]:
         status = await self._client.get_status()
-        return parse_status(status)
+        return parse_status(status, protocol="coap")
 
     async def get_status(self) -> Dict[str, Any]:
         return await self._client.get_status()

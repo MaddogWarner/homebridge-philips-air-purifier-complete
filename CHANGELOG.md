@@ -6,6 +6,15 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **CoAP mode readback:** a local CoAP purifier reporting mode code `1` (manual speed 1 on
+  AC22xx/AC095x) is no longer shown as Auto in HomeKit. Code `1` means Auto only for Air+ cloud
+  devices (AC0650); Air+ cloud and HTTP mappings are unchanged.
+
+---
 ## [5.0.0] — 25/11/2026
 
 This is the first published release since 4.2.0, so it also includes everything listed under
