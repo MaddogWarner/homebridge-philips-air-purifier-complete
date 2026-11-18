@@ -6,6 +6,17 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- Local CoAP Auto commands now send mode code `0`. A shared Air+ status alias had
+  overwritten that mapping with `1`, preventing Auto from being selected on
+  AC22xx and AC095x purifiers. CoAP status updates no
+  longer interpret code `1` as Auto; Air+ cloud and HTTP mappings are unchanged.
+
+---
+
 ## [4.2.0] — 03/11/2026
 
 ### Fixed
