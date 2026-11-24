@@ -3,13 +3,17 @@ name: Dependabot auto-merge
 on: pull_request
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 jobs:
   automerge:
     runs-on: ubuntu-latest
-    if: github.actor == 'dependabot[bot]'
+    permissions:
+      contents: write
+      pull-requests: write
+    # PR author, not github.actor: the actor is whoever triggered this run,
+    # which can differ from the PR author (e.g. a re-run by a maintainer).
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
     steps:
       - name: Fetch Dependabot metadata
         id: metadata

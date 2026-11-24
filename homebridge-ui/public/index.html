@@ -420,7 +420,7 @@
             </div>
             <div class="field">
               <label>Encryption Key (hex, optional)</label>
-              <input type="text" data-field="encryptionKey" value="${encVal}">
+              <input type="password" data-field="encryptionKey" value="${encVal}">
             </div>
           </div>
 
@@ -432,7 +432,7 @@
             </div>
             <div class="field">
               <label>Token File Path</label>
-              <input type="text" data-field="airplusTokenFile" value="${tokVal}" placeholder="~/.homebridge/philips-airplus-{uuid}.json">
+              <input type="text" data-field="airplusTokenFile" value="${tokVal}" placeholder="(Homebridge storage)/philips-airplus-{uuid}.json">
             </div>
           </div>
 
@@ -530,6 +530,24 @@
       return devices;
     }
 
+    function isIPv4(host) {
+      const parts = host.split('.');
+      return parts.length === 4 && parts.every(p => /^\d{1,3}$/.test(p) && parseInt(p, 10) <= 255);
+    }
+
+    // Returns an error message, or '' when the device is valid.
+    function validateDevice(d) {
+      if (!d.name) return 'missing a name.';
+      if (d.protocol === 'airplus-cloud') {
+        if (!d.airplusDeviceUuid) return 'Air+ devices need a Device UUID (use the Air+ setup wizard).';
+        if (!/^[A-Za-z0-9_-]{1,128}$/.test(d.airplusDeviceUuid)) return 'Device UUID may only contain letters, digits, underscores or hyphens.';
+        return '';
+      }
+      if (!d.host) return 'missing an IP address.';
+      if (!isIPv4(d.host)) return `"${d.host}" is not a valid IPv4 address (hostnames are not supported).`;
+      return '';
+    }
+
     // ---------- config load / save ----------
     async function loadConfig() {
       const configs = await homebridge.getPluginConfig();
@@ -583,10 +601,11 @@
         const name    = document.getElementById('platform-name').value.trim() || DEFAULT_PLATFORM_NAME;
         const devices = collectDevices();
 
-        // Validate: all devices need a name
-        const unnamed = devices.findIndex(d => !d.name);
-        if (unnamed >= 0) {
-          showStatus(`Device ${unnamed + 1} is missing a name.`, 'error');
+        // Validate with the same rules index.js enforces at startup, so a
+        // bad entry is caught here instead of failing to load in Homebridge.
+        const problem = devices.map(validateDevice).findIndex(Boolean);
+        if (problem >= 0) {
+          showStatus(`Device ${problem + 1}: ${validateDevice(devices[problem])}`, 'error');
           return;
         }
 

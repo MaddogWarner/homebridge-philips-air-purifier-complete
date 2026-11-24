@@ -75,8 +75,12 @@ function fakeHttps(respond) {
 
   https.request = (options, callback) => {
     const written = [];
+    let timeoutMs = null;
     return {
       on() {},
+      setTimeout(ms) {
+        timeoutMs = ms;
+      },
       write(chunk) {
         written.push(String(chunk));
       },
@@ -87,6 +91,7 @@ function fakeHttps(respond) {
           method: options.method || 'GET',
           headers: options.headers || {},
           body: written.join(''),
+          timeoutMs,
         };
         calls.push(call);
         const reply = respond(call);
@@ -220,6 +225,12 @@ test('getIDs is requested from the socialize namespace', async (t) => {
   // /accounts.socialize.getIDs is not a valid Gigya method and CDC answers it with
   // "Permission denied", which stops setup dead at the verification code step.
   assert.equal(getIds.path, '/socialize.getIDs');
+});
+
+test('every upstream Air+ request has a timeout so the wizard cannot hang', async (t) => {
+  const { calls } = await runOtpFlow(t);
+  assert.ok(calls.length > 0);
+  for (const call of calls) assert.equal(call.timeoutMs, 15000, call.path);
 });
 
 test('the login handshake resumes at the OIDC continue endpoint', async (t) => {
@@ -356,4 +367,28 @@ test('save rejects incomplete stored refresh tokens and preserves an existing to
     assert.equal(fs.readFileSync(tokenPath, 'utf8'), 'existing token file');
     assert.deepEqual(fs.readdirSync(directory), [path.basename(tokenPath)]);
   }
+});
+
+test('a pasted redirect from a different login attempt is rejected before any token exchange', async (t) => {
+  const server = new AirPlusSetupServer();
+  const calls = fakeHttps(() => null);
+  t.after(() => calls.restore());
+  await server.handleInit();
+  await assert.rejects(
+    server.handleExchange({ redirectUrl: 'com.philips.air://loginredirect?code=abc&state=not-this-flow' }),
+    /different login attempt/,
+  );
+  assert.equal(calls.length, 0);
+});
+
+test('the consent-page fallback never fetches a host other than accounts.home.id', async (t) => {
+  const server = new AirPlusSetupServer();
+  const calls = fakeHttps(() => null);
+  t.after(() => calls.restore());
+  await server.handleInit();
+  await assert.rejects(
+    server.handleExchange({ redirectUrl: 'https://10.0.0.1/admin?x=accounts.home.id' }),
+    /No authorisation code/,
+  );
+  assert.equal(calls.length, 0);
 });

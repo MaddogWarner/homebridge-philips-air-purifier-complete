@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import json
 import logging
+import sys
 
 from aioairctrl import CoAPClient
 
@@ -85,8 +86,9 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-async def async_main() -> None:
+async def async_main() -> int:
     args = parse_args()
+    exit_code = 0
     if args.debug:
         logger.setLevel(logging.DEBUG)
         logging.getLogger("coap").setLevel(logging.DEBUG)
@@ -124,17 +126,20 @@ async def async_main() -> None:
                         break
                 data[k] = v
             if data:
-                await client.set_control_values(data=data)
+                if not await client.set_control_values(data=data):
+                    print("Device rejected the command")
+                    exit_code = 1
     except (KeyboardInterrupt, asyncio.CancelledError):
         pass
     finally:
         if client:
             await client.shutdown()
+    return exit_code
 
 
 def main():
     try:
-        asyncio.run(async_main())
+        sys.exit(asyncio.run(async_main()))
     except KeyboardInterrupt:
         pass
 

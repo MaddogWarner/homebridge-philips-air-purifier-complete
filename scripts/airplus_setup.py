@@ -350,8 +350,19 @@ def _browser_login() -> dict:
     # Step 4: Extract the authorisation code
     code, returned_state = _extract_code_from_redirect(redirect_url)
 
-    if returned_state and returned_state != state:
-        print("WARNING: state mismatch — possible CSRF. Proceeding anyway.", file=sys.stderr)
+    # A URL copied from the login page may carry the code without a state;
+    # PKCE still stops a foreign code being redeemed, so only warn. A state
+    # that is present but wrong means the URL is not from this login.
+    if not returned_state:
+        print(
+            "WARNING: no state in the redirect URL; cannot confirm it is from this login.",
+            file=sys.stderr,
+        )
+    elif returned_state != state:
+        raise RuntimeError(
+            "State mismatch — the redirect URL is not from this login (possible CSRF). "
+            "Start setup again and paste the URL from the same browser session."
+        )
 
     print("\nExchanging authorisation code for tokens...")
     return _exchange_code(code, code_verifier)

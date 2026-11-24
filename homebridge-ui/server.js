@@ -22,6 +22,9 @@ const USER_AGENT = 'okhttp/4.12.0 (Android 14; Pixel 7)';
 const SCOPE =
   'openid email profile DI.Account.read DI.Account.write DI.AccountProfile.read DI.AccountProfile.write DI.AccountGeneralConsent.read DI.AccountGeneralConsent.write DI.GeneralConsent.read subscriptions profile_extended consents DI.AccountSubscription.read DI.AccountSubscription.write';
 const DEBUG_AUTH = process.env.PHILIPS_AIRPLUS_DEBUG === '1';
+// Upstream calls fail rather than leaving the wizard hung; matches
+// scripts/airplus_setup.py.
+const HTTPS_TIMEOUT_MS = 15000;
 
 /**
  * Minimal cookie store for the CDC handshake.
@@ -101,20 +104,25 @@ class AirPlusSetupServer extends HomebridgePluginUiServer {
     // many desktop browsers land on instead. Parse it directly (query → fragment →
     // regex), mirroring scripts/airplus_setup.py.
     let code = this._extractCode(redirectUrl);
+    let state = this._extractParam(redirectUrl, 'state');
 
     // Last resort: the user pasted a Philips consent page that did not carry the
     // code in its own URL. Fetch it and scan for an embedded deep link. This only
     // works if the page is reachable unauthenticated, so treat failure as benign.
-    if (!code && redirectUrl.includes('accounts.home.id')) {
+    // Only ever fetch accounts.home.id itself, never another host named in the URL.
+    const proxyUrl = this._parseUrl(redirectUrl);
+    if (!code && proxyUrl && proxyUrl.protocol === 'https:' && this._isHomeIdHost(proxyUrl.hostname)) {
       try {
-        const proxyUrl = new URL(redirectUrl);
         const html = await this._httpsGetRaw({
           hostname: proxyUrl.hostname,
           path: proxyUrl.pathname + proxyUrl.search,
           headers: { 'User-Agent': USER_AGENT, Accept: 'text/html' },
         });
         const m = html.match(/com\.philips\.air:\/\/loginredirect[^\s"'\\]*code=([^&\s"'\\]+)/);
-        if (m) code = decodeURIComponent(m[1]);
+        if (m) {
+          code = decodeURIComponent(m[1]);
+          state = this._extractParam(m[0], 'state');
+        }
       } catch (_) { /* fall through to descriptive error */ }
     }
 
@@ -127,6 +135,13 @@ class AirPlusSetupServer extends HomebridgePluginUiServer {
         'no "code=" in its address, log in again and copy the URL the moment the page ' +
         'finishes loading.'
       );
+    }
+
+    // A state that does not match this flow means the code came from a different
+    // login. A missing state is tolerated: the accounts.home.id page URL can carry
+    // the code without it, and PKCE already stops a foreign code being redeemed.
+    if (state && state !== this._pkce.state) {
+      throw new Error('That URL belongs to a different login attempt. Start the Air+ login again and paste the new URL.');
     }
 
     return this._exchangeCodeAndListDevices(code, this._pkce.verifier);
@@ -226,7 +241,10 @@ class AirPlusSetupServer extends HomebridgePluginUiServer {
       throw new Error('No Air+ token is available. Complete the login flow first.');
     }
 
-    const tokenPath = path.join(os.homedir(), '.homebridge', 'philips-airplus-' + uuid + '.json');
+    // Homebridge's storage directory is included in its backups and is the
+    // persistent volume on Docker/hb-service installs, unlike ~/.homebridge.
+    const storageDir = this.homebridgeStoragePath || path.join(os.homedir(), '.homebridge');
+    const tokenPath = path.join(storageDir, 'philips-airplus-' + uuid + '.json');
     const { access_token, refresh_token, id_token, expires_in } = this._tokens;
     if (typeof id_token !== 'string' || !id_token.trim()) {
       throw new Error(
@@ -248,38 +266,39 @@ class AirPlusSetupServer extends HomebridgePluginUiServer {
       expires_at: Date.now() / 1000 + (expires_in || 3600),
     };
 
-    const tmp = tokenPath + '.tmp';
+    // Unpredictable temp name opened exclusively ('wx' never follows an existing
+    // file or symlink), created owner-only, and removed if anything fails.
+    const tmp = tokenPath + '.' + crypto.randomBytes(8).toString('hex') + '.tmp';
     fs.mkdirSync(path.dirname(tokenPath), { recursive: true });
-    fs.writeFileSync(tmp, JSON.stringify(tokenData, null, 2), { encoding: 'utf8', mode: 0o600 });
-    fs.chmodSync(tmp, 0o600);
-    fs.renameSync(tmp, tokenPath);
+    try {
+      fs.writeFileSync(tmp, JSON.stringify(tokenData, null, 2), { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+      fs.renameSync(tmp, tokenPath);
+    } catch (error) {
+      fs.rmSync(tmp, { force: true });
+      throw error;
+    }
     fs.chmodSync(tokenPath, 0o600);
 
     return { success: true, uuid, name: name || 'Philips Air Purifier', tokenFile: tokenPath };
   }
 
   _extractCode(redirectUrl) {
+    return this._extractParam(redirectUrl, 'code');
+  }
+
+  _parseUrl(value) {
+    try { return new URL(String(value || '').trim()); } catch (_) { return null; }
+  }
+
+  _isHomeIdHost(hostname) {
+    return hostname === 'accounts.home.id' || hostname.endsWith('.accounts.home.id');
+  }
+
+  _extractParam(redirectUrl, name) {
     const trimmed = String(redirectUrl || '').trim();
     if (!trimmed) return null;
-
     // Normalise the custom scheme so the URL parser accepts it.
-    const normalised = trimmed.replace(/^com\.philips\.air:\/\//i, 'https://airplus.local/');
-    let parsed = null;
-    try { parsed = new URL(normalised); } catch (_) { parsed = null; }
-
-    if (parsed) {
-      const fromQuery = parsed.searchParams.get('code');
-      if (fromQuery) return fromQuery;
-      // OIDC may return the response in the URL fragment (#code=…&state=…).
-      if (parsed.hash && parsed.hash.length > 1) {
-        const fromFragment = new URLSearchParams(parsed.hash.slice(1)).get('code');
-        if (fromFragment) return fromFragment;
-      }
-    }
-
-    // Fallback for unusual encodings the URL parser may not split cleanly.
-    const m = trimmed.match(/[?&#]code=([^&\s"'\\]+)/);
-    return m ? decodeURIComponent(m[1]) : null;
+    return this._readUrlParam(trimmed.replace(/^com\.philips\.air:\/\//i, 'https://airplus.local/'), name);
   }
 
   _createPkce() {
@@ -393,7 +412,7 @@ class AirPlusSetupServer extends HomebridgePluginUiServer {
     try {
       parsed = raw.body ? JSON.parse(raw.body) : {};
     } catch (_e) {
-      throw new Error(label + ' returned invalid JSON: ' + raw.body.slice(0, 200));
+      throw new Error(label + ' returned invalid JSON: ' + raw.body.slice(0, 200), { cause: _e });
     }
 
     if (raw.status < 200 || raw.status >= 300) {
@@ -441,7 +460,7 @@ class AirPlusSetupServer extends HomebridgePluginUiServer {
 
   _debugLocation(label, status, location) {
     if (!DEBUG_AUTH) return;
-    let safeLocation = location || '';
+    let safeLocation;
     try {
       const parsed = new URL(location, AUTHORIZE_ENDPOINT);
       for (const key of ['code', 'context', 'login_token', 'gmidTicket']) {
@@ -482,6 +501,7 @@ class AirPlusSetupServer extends HomebridgePluginUiServer {
         });
       });
 
+      req.setTimeout(HTTPS_TIMEOUT_MS, () => req.destroy(new Error('Request to ' + options.hostname + ' timed out')));
       req.on('error', reject);
 
       if (postBody) {
@@ -509,6 +529,7 @@ class AirPlusSetupServer extends HomebridgePluginUiServer {
         });
       });
 
+      req.setTimeout(HTTPS_TIMEOUT_MS, () => req.destroy(new Error('Request to ' + options.hostname + ' timed out')));
       req.on('error', reject);
 
       if (postBody) {
@@ -528,6 +549,7 @@ class AirPlusSetupServer extends HomebridgePluginUiServer {
           resolve(Buffer.concat(chunks).toString('utf8'));
         });
       });
+      req.setTimeout(HTTPS_TIMEOUT_MS, () => req.destroy(new Error('Request to ' + options.hostname + ' timed out')));
       req.on('error', reject);
       req.end();
     });

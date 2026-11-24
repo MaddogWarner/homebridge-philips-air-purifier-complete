@@ -10,8 +10,12 @@ on:
 
 jobs:
   analyze:
-    name: Analyze (javascript-typescript)
+    name: Analyze (${{ matrix.language }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [javascript-typescript, python]
     permissions:
       security-events: write
       actions: read
@@ -20,8 +24,8 @@ jobs:
       - uses: actions/checkout@v7
       - uses: github/codeql-action/init@v4
         with:
-          languages: javascript-typescript
+          languages: ${{ matrix.language }}
       - uses: github/codeql-action/autobuild@v4
       - uses: github/codeql-action/analyze@v4
         with:
-          category: "/language:javascript-typescript"
+          category: "/language:${{ matrix.language }}"

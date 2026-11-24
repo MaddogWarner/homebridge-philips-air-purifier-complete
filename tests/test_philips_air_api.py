@@ -193,6 +193,7 @@ class AirPlusModelIdRecoveryTests(unittest.TestCase):
         client = AirPlusCloudClient.__new__(AirPlusCloudClient)
         client._uuid = "00000000-0000-4000-8000-000000000000"
         client._tokens = {}
+        client._token_lock = threading.RLock()
         client._api_get = lambda path: [
             {
                 "id": "00000000-0000-4000-8000-000000000000",
@@ -243,7 +244,7 @@ class AirPlusModelIdRecoveryTests(unittest.TestCase):
                 ensure_threads.append(threading.get_ident())
                 return "AC1715/11"
 
-            def set_values(self, values):
+            def set_values(self, values, deadline=None):
                 set_calls.append(values)
 
         daemon._client = _StubClient()
@@ -263,7 +264,7 @@ class AirPlusModelIdRecoveryTests(unittest.TestCase):
             def ensure_model_id(self):
                 return None
 
-            def set_values(self, values):
+            def set_values(self, values, deadline=None):
                 set_calls.append(values)
 
         daemon._client = _StubClient()

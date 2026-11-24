@@ -21,7 +21,11 @@ class EncryptionContext:
         self._client_key = client_key
 
     def _increment_client_key(self):
-        client_key_next = (int(self._client_key, 16) + 1).to_bytes(4, byteorder="big").hex().upper()
+        # The key is a 32-bit counter: wrap at FFFFFFFF rather than overflow.
+        client_key_next = (
+            ((int(self._client_key, 16) + 1) & 0xFFFFFFFF)
+            .to_bytes(4, byteorder="big").hex().upper()
+        )
         self._client_key = client_key_next
 
     def _create_cipher(self, key: str):

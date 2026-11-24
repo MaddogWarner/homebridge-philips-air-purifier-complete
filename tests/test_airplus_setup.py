@@ -7,7 +7,7 @@ import stat
 import tempfile
 import sys
 import unittest
-from contextlib import redirect_stderr
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
@@ -63,6 +63,56 @@ class AirPlusSetupTests(unittest.TestCase):
                 self.assertEqual(result, 1)
                 save_tokens.assert_not_called()
                 self.assertIn("No id_token in token response", error_output.getvalue())
+
+
+class BrowserLoginStateTests(unittest.TestCase):
+    """The pasted redirect URL's OAuth state must match the one this login sent."""
+
+    def _login(self, redirect_url):
+        errors = io.StringIO()
+        with mock.patch.object(airplus_setup.secrets, "token_urlsafe", return_value="state-1"), \
+                mock.patch("builtins.input", return_value=redirect_url), \
+                mock.patch.object(airplus_setup, "_exchange_code",
+                                  return_value={"access_token": "a"}) as exchange, \
+                redirect_stdout(io.StringIO()), redirect_stderr(errors):
+            try:
+                result = airplus_setup._browser_login()
+            except RuntimeError as e:
+                result = e
+        return result, exchange, errors.getvalue()
+
+    def test_mismatched_state_is_rejected_before_code_exchange(self):
+        result, exchange, _ = self._login(f"{airplus_setup.REDIRECT_URI}?code=c1&state=other")
+        self.assertIsInstance(result, RuntimeError)
+        self.assertIn("State mismatch", str(result))
+        exchange.assert_not_called()
+
+    def test_matching_state_exchanges_code(self):
+        result, exchange, errors = self._login(
+            f"{airplus_setup.REDIRECT_URI}?code=c1&state=state-1")
+        self.assertEqual(result, {"access_token": "a"})
+        self.assertEqual(exchange.call_args.args[0], "c1")
+        self.assertEqual(errors, "")
+
+    def test_missing_state_warns_and_continues(self):
+        result, exchange, errors = self._login(f"{airplus_setup.REDIRECT_URI}?code=c1")
+        self.assertEqual(result, {"access_token": "a"})
+        exchange.assert_called_once()
+        self.assertIn("WARNING: no state", errors)
+
+    def test_main_exits_non_zero_on_state_mismatch(self):
+        errors = io.StringIO()
+        with mock.patch.object(sys, "argv", ["airplus_setup.py", "--browser"]), \
+                mock.patch.object(airplus_setup.secrets, "token_urlsafe", return_value="state-1"), \
+                mock.patch("builtins.input",
+                           return_value=f"{airplus_setup.REDIRECT_URI}?code=c1&state=evil"), \
+                mock.patch.object(airplus_setup, "_exchange_code") as exchange, \
+                mock.patch.object(airplus_setup, "_save_selected_device") as save, \
+                redirect_stdout(io.StringIO()), redirect_stderr(errors):
+            self.assertEqual(airplus_setup.main(), 1)
+        exchange.assert_not_called()
+        save.assert_not_called()
+        self.assertIn("ERROR: State mismatch", errors.getvalue())
 
 
 class TokenFileTests(unittest.TestCase):

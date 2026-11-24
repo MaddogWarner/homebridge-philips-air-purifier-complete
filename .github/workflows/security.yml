@@ -8,12 +8,14 @@ on:
 
 permissions:
   contents: read
-  security-events: write
 
 jobs:
   security:
     name: security
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write  # Semgrep SARIF upload
     steps:
       - uses: actions/checkout@v7
         with:
@@ -32,13 +34,26 @@ jobs:
       - name: Install audit tools
         run: pip install pip-audit bandit
 
+      # Audit the plugin's own Python dependencies, not the runner's packages.
       - name: pip-audit
-        run: pip-audit || true
+        run: pip-audit -r requirements.txt
 
+      # Scoped to shipped Python code. Skipped checks are reviewed exceptions:
+      # B310 - urlopen is only called with https:// constants or the http://
+      #        device URL the plugin builds itself; B324 - MD5 is mandated by
+      #        the Philips CoAP protocol (aioairctrl/coap/encryption.py).
       - name: Bandit SAST
-        run: bandit -r . -ll -x ./.git,./node_modules --quiet || true
+        run: bandit -r philips_air_api.py aioairctrl scripts -ll --quiet --skip B310,B324
 
+      # Findings are published to Code Scanning rather than failing the build.
       - name: Semgrep
         run: |
           pip install semgrep
-          semgrep --config=p/default --config=p/secrets --config=p/owasp-top-ten --error --quiet || true
+          semgrep --config=p/default --config=p/secrets --config=p/owasp-top-ten --sarif --output semgrep.sarif --quiet
+
+      - name: Upload Semgrep results
+        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep

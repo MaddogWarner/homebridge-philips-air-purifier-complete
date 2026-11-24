@@ -11,3 +11,8 @@ build/
 *.log
 test-*.cjs
 .pytest_cache/
+
+# Local working notes (not part of the project; may hold private network details)
+airplus-device-validation.md
+codex-plan.md
+hb-verified.md
