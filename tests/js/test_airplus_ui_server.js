@@ -415,14 +415,24 @@ test('/env/check applies the same pythonPath validation as the plugin', async ()
 
 test('/env/check accepts a valid configured interpreter, by path or command name', async () => {
   const route = instances[0].routes['/env/check'];
-  const { found } = require('../../python-runtime').findPython(path.join(__dirname, '..', '..'));
+  const runtime = require('../../python-runtime');
+  const pluginDir = path.join(__dirname, '..', '..');
+  const { found } = runtime.findPython(pluginDir);
   assert.ok(found, 'expected a Python 3.11+ on this machine');
-  for (const pythonPath of [found.path, path.basename(found.path)]) {
-    const result = await route({ pythonPath });
-    assert.equal(result.source, 'configured');
-    assert.equal(result.ok, true, pythonPath);
-    assert.equal(result.version, found.version);
-  }
+
+  const byPath = await route({ pythonPath: found.path });
+  assert.equal(byPath.source, 'configured');
+  assert.equal(byPath.ok, true);
+  assert.equal(byPath.version, found.version);
+
+  // A command name is resolved on PATH, which may be a different interpreter
+  // from the auto-detected one, so compare with a direct check of the same name.
+  const name = path.basename(found.path);
+  const byName = await route({ pythonPath: name });
+  const direct = runtime.inspectPython(name, pluginDir);
+  assert.equal(byName.error, undefined);
+  assert.equal(byName.ok, direct.ok);
+  assert.equal(byName.version, direct.version);
 });
 
 test('/env/check reports a configured python that does not exist', async () => {
