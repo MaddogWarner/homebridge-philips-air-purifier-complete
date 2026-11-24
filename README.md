@@ -10,9 +10,9 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
 </p>
 
-Control your Philips Air Purifier from Apple HomeKit via Homebridge — **with no separate Python package install required**.
+Control your Philips Air Purifier from Apple HomeKit via Homebridge — **no install scripts, no pip, no virtual environment**.
 
-This plugin bundles the [aioairctrl](https://github.com/betaboon/aioairctrl) CoAP library directly. Installing the plugin is all you need; the Python environment is set up automatically for Python 3.11 or newer.
+Everything the plugin needs ships inside the npm package: the [aioairctrl](https://github.com/betaboon/aioairctrl) CoAP library, its Python dependencies, and a pure-Python AES implementation. The only requirement is Python 3.11 or newer, which most Linux-based Homebridge hosts already have.
 
 ---
 
@@ -32,6 +32,20 @@ For security reporting and known protocol limitations, see [SECURITY.md](SECURIT
 - **Real-time Updates** — CoAP Observe push updates (AC2xxx+) or 10-second HTTP polling (HTTP/HomeID)
 - **Auto-reconnect** — Daemon restarts automatically with exponential backoff if the device drops off
 
+### Compared with other Philips plugins
+
+| | This plugin | [`@atdr/homebridge-philipsair-platform`](https://github.com/atdr/homebridge-philipsair-platform) | [`homebridge-philips-airplus-cloud`](https://www.npmjs.com/package/homebridge-philips-airplus-cloud) |
+|---|---|---|---|
+| Local CoAP (AC2xxx+) | Yes | Yes | No |
+| Local HTTP DH/AES (older AC1xxx/AC2xxx firmware) | Yes | No | No |
+| HomeID / PhilipsCondor local HTTP(S) | Yes | No | No |
+| Air+ cloud (AC0650, AC1715) | Yes | No | Yes |
+| Mixed protocols in one platform | Yes | — | — |
+| Python packages you install yourself | None (bundled) | `aioairctrl` via pip/pipx | None |
+
+The other plugins cover things this one doesn't, such as humidifier models and wider per-model
+mappings in `@atdr/homebridge-philipsair-platform`. Pick the one that fits your devices.
+
 ---
 
 ## Prerequisites
@@ -39,28 +53,27 @@ For security reporting and known protocol limitations, see [SECURITY.md](SECURIT
 | Requirement | Version |
 |-------------|---------|
 | [Homebridge](https://homebridge.io) | >= 2.0.0 |
-| Node.js | >= 24.0.0 |
-| Python 3 | >= 3.11 |
+| Node.js | 22, 24 or 26 |
+| Python 3 | >= 3.11 (standard library only) |
 | Your Philips Air Purifier's **IP address** | — |
 
-Python 3.11 or newer must be installed on the system running Homebridge. The official Homebridge
-Raspberry Pi image and most Debian/Ubuntu systems already ship a suitable Python 3, so usually no
-extra install is needed. On platforms that need it:
+The plugin installs no Python packages. `aiocoap` and `paho-mqtt` are bundled in `vendor/`
+(pinned in `requirements.txt`) and AES is implemented in pure Python, so any Python 3.11+
+works as it is.
+
+Most Homebridge hosts already have a suitable Python. If yours doesn't:
 
 ```bash
-# macOS
-brew install python@3.11
-
-# Raspberry Pi / Ubuntu / Debian (Debian 12 "bookworm" ships Python 3.11)
-sudo apt install python3 python3-venv
+# macOS (the built-in python3 is too old)
+brew install python
 ```
 
-The install hook creates a plugin-local virtual environment and installs:
+```bash
+# Debian, Ubuntu, Raspberry Pi OS
+sudo apt install python3
+```
 
-| Python package | Supported range |
-|----------------|-----------------|
-| `aiocoap` | `>=0.4.17,<0.5` |
-| `pycryptodomex` | `>=3.23,<4` |
+On Windows, install Python from [python.org](https://www.python.org/downloads/).
 
 ---
 
@@ -71,29 +84,17 @@ The install hook creates a plugin-local virtual environment and installs:
 1. Open the Homebridge UI
 2. Go to **Plugins**
 3. Search for `homebridge-philips-air-purifier-complete`
-4. Click **Install**
+4. Click **Install**, then open **Plugin Settings**
 
-The plugin automatically sets up a Python virtual environment and installs its CoAP dependencies during install. No extra steps needed.
+The **Environment** panel at the top of Plugin Settings shows which Python was found and, if
+none was, the exact command to fix it. Python is auto-detected. If yours is somewhere unusual
+(Docker, NAS), set **Python Path** on the device to its absolute path, or set the
+`PHILIPS_AIR_PYTHON` environment variable for Homebridge.
 
-The npm `preinstall` check reports warnings if Node.js 24+ or Python 3.11+ is not available on the host, but it does not block installation. This keeps Homebridge UI plugin installation simple while still making unsupported runtime versions visible in the install log.
-
-For Docker, NAS, or managed Homebridge installs where npm runs with a restricted `PATH`, provide the Python path explicitly:
-
-```bash
-PHILIPS_AIR_PYTHON=/absolute/path/to/python3 npm install -g homebridge-philips-air-purifier-complete
-```
-
-The installer also honours npm's Python setting:
-
-```bash
-npm install -g homebridge-philips-air-purifier-complete --python=/absolute/path/to/python3
-```
-
-If the install environment cannot expose Python until after the plugin is installed, configure `pythonPath` in Homebridge before starting the plugin. You can also suppress the Python preinstall warning:
-
-```bash
-PHILIPS_AIR_SKIP_PYTHON_PREINSTALL=1 npm install -g homebridge-philips-air-purifier-complete
-```
+If no usable Python is found, the plugin logs one error saying what it found and why it can't use
+it (for example "Python 3.10.12, older than 3.11"), with the fix. Its accessories show as **Not
+Responding**, and it doesn't retry until Homebridge restarts. The panel runs in the settings UI
+process; Homebridge normally sees the same Python unless it runs with a different `PATH`.
 
 ### Via npm
 
@@ -101,11 +102,8 @@ PHILIPS_AIR_SKIP_PYTHON_PREINSTALL=1 npm install -g homebridge-philips-air-purif
 npm install -g homebridge-philips-air-purifier-complete
 ```
 
-If the automatic setup fails (e.g., Python 3.11+ wasn't installed yet), re-run it manually:
-
-```bash
-bash $(npm root -g)/homebridge-philips-air-purifier-complete/postinstall.sh
-```
+No install step runs. Upgrading from v4.x leaves nothing behind, because the old `.venv` lived
+inside the plugin folder and npm replaces that folder.
 
 ---
 
@@ -153,13 +151,12 @@ v3.0.0 changes the plugin type from `accessory` to `platform`. Update your Homeb
 
 3. Restart Homebridge.
 
-From v3.2.3, old top-level `"accessory": "PhilipsAirPurifier"` entries are not loaded by
-default. If Homebridge logs `Loading 1 accessories...` followed by
-`Legacy accessories[] config detected`, the old entry is still present in the full Homebridge
-`config.json` even if this plugin's platform settings modal only shows `{ "platform":
-"PhilipsAirPurifier" }`. Remove the old object from the top-level `"accessories"` array and keep
-the device under `"platforms"[]."devices"` instead. For temporary rollback only, set
-`PHILIPS_AIR_ALLOW_LEGACY_ACCESSORY=1` before starting Homebridge.
+From v5.0.0 the plugin no longer registers an accessory at all (it was already disabled by
+default from v3.2.3), and the `PHILIPS_AIR_ALLOW_LEGACY_ACCESSORY` rollback has been removed.
+If Homebridge logs `No plugin was found for the accessory "PhilipsAirPurifier"`, an old entry is
+still in the top-level `"accessories"` array of `config.json`, even if this plugin's settings
+only show `{ "platform": "PhilipsAirPurifier" }`. Homebridge keeps running. Delete that old
+object and keep the device under `"platforms"[]."devices"`.
 
 ### Migration examples
 
@@ -379,7 +376,7 @@ runtime for backwards compatibility, but that field is no longer shown in the GU
 | `devices[].encryptionKey` | No | Auto-fetched when possible | Optional hex AES key for HomeID encrypted payloads. Leave blank unless you already know it. |
 | `devices[].airplusDeviceUuid` | Yes for Air+ | — | Philips Air+ device UUID. Filled automatically by the setup wizard. |
 | `devices[].airplusTokenFile` | No | `<Homebridge storage>/philips-airplus-{uuid}.json` (falls back to an existing `~/.homebridge/philips-airplus-{uuid}.json`) | Token file written by the setup wizard or CLI setup script. |
-| `devices[].pythonPath` | No | Auto-detected | Path to Python 3.11 or newer with `aiocoap` and `pycryptodomex` installed. Leave blank to use the plugin's bundled virtual environment. |
+| `devices[].pythonPath` | No | Auto-detected | Path or command name for Python 3.11 or newer (for example `/usr/local/bin/python3.12` or `python3.12`). No packages are needed. Leave blank to auto-detect; the Environment panel in Plugin Settings shows what was found. |
 | `additionalDevicesJson` | No | — | Legacy v3.1 runtime fallback. Additional entries are still merged with `devices[]`, but this field is no longer shown in the GUI. |
 
 ### Model Compatibility
@@ -438,8 +435,7 @@ If your Homebridge host has no browser access (Docker, NAS, headless Raspberry P
 
 ```bash
 cd /path/to/homebridge-philips-air-purifier-complete
-source .venv/bin/activate
-python scripts/airplus_setup.py
+python3 scripts/airplus_setup.py
 ```
 
 Follow the on-screen instructions. The script sends an email verification code, saves a token file to
@@ -448,7 +444,7 @@ Follow the on-screen instructions. The script sends an email verification code, 
 To use the legacy browser redirect-copy fallback instead:
 
 ```bash
-python scripts/airplus_setup.py --browser
+python3 scripts/airplus_setup.py --browser
 ```
 
 ---
@@ -458,15 +454,12 @@ python scripts/airplus_setup.py --browser
 Before configuring Homebridge, you can verify the plugin can reach your device:
 
 ```bash
-# Activate the plugin's virtual environment
-source $(npm root -g)/homebridge-philips-air-purifier-complete/.venv/bin/activate
-
-# Run a sensor query
-python $(npm root -g)/homebridge-philips-air-purifier-complete/philips_air_api.py 192.168.1.100 sensors
+# Run a sensor query (any Python 3.11+, nothing to activate)
+python3 $(npm root -g)/homebridge-philips-air-purifier-complete/philips_air_api.py 192.168.1.100 sensors
 
 # Probe HomeID local HTTP endpoints without changing device state
-python $(npm root -g)/homebridge-philips-air-purifier-complete/philips_air_api.py 192.168.1.100 probe-homeid
-python $(npm root -g)/homebridge-philips-air-purifier-complete/philips_air_api.py 192.168.1.100 probe-homeid --use-https
+python3 $(npm root -g)/homebridge-philips-air-purifier-complete/philips_air_api.py 192.168.1.100 probe-homeid
+python3 $(npm root -g)/homebridge-philips-air-purifier-complete/philips_air_api.py 192.168.1.100 probe-homeid --use-https
 ```
 
 You should see a JSON payload with PM2.5, filter life, temperature, and so on. CoAP can be flaky on the first connection — re-run if you get a timeout.
@@ -497,7 +490,7 @@ Homebridge (Node.js)
     │  stdin/stdout JSON
     │
     ▼
-philips_air_api.py  ─── aioairctrl/ (bundled) ──► aiocoap ──► Philips device (CoAP)
+philips_air_api.py  ─── aioairctrl/ ──► aiocoap (vendor/) ──► Philips device (CoAP)
     │
     ├──────────────────── DH/AES HTTP polling ──────────────► Philips device (HTTP)
     │
@@ -548,14 +541,11 @@ python3 philips_air_api.py 192.168.1.100 childlock off
 - Run the connectivity check above
 - Check Homebridge logs for daemon error messages
 
-**Python setup failed during install**
-- Ensure Python 3.11+ and the matching `venv` package are installed, then re-run `bash postinstall.sh`
-
-**Preinstall warnings**
-- Warnings about Node.js mean `node --version` did not report v24.0.0 or newer during install
-- Warnings about Python mean `python3 --version` did not report Python 3.11 or newer during install
-- If Python 3.11+ is installed but not visible to npm, install with `PHILIPS_AIR_PYTHON=/absolute/path/to/python3 npm install -g homebridge-philips-air-purifier-complete`
-- If Python can only be configured after install, set `pythonPath` in the Homebridge plugin configuration before starting Homebridge
+**Log says `Python 3.11+ was not found`**
+- Open **Plugin Settings**. The **Environment** panel shows what was checked and the fix for your OS
+- Install Python 3.11+ (see [Prerequisites](#prerequisites)), then restart Homebridge
+- If Python is installed somewhere the plugin doesn't look, set **Python Path** on the device (an
+  absolute path such as `/usr/local/bin/python3.12`) or the `PHILIPS_AIR_PYTHON` environment variable
 
 **Persistent CoAP timeouts**
 - CoAP (UDP) can be blocked by some network configurations; ensure UDP is allowed between Homebridge and the device

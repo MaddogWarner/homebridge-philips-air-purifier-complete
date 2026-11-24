@@ -6,6 +6,16 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { URLSearchParams, URL } = require('node:url');
+const {
+  PYTHON_MIN_VERSION,
+  describeRejection,
+  findPython,
+  inspectPython,
+  pythonInstallHint,
+  pythonPathError,
+} = require('../python-runtime');
+
+const PLUGIN_DIR = path.join(__dirname, '..');
 
 const TENANT = '4_JGZWlP8eQHpEqkvQElolbA';
 const CLIENT_ID = '-XsK7O6iEkLml77yDGDUi0ku';
@@ -78,7 +88,34 @@ class AirPlusSetupServer extends HomebridgePluginUiServer {
     this.onRequest('/auth/otp/send', this.handleOtpSend.bind(this));
     this.onRequest('/auth/otp/verify', this.handleOtpVerify.bind(this));
     this.onRequest('/auth/save', this.handleSave.bind(this));
+    this.onRequest('/env/check', this.handleEnvCheck.bind(this));
     this.ready();
+  }
+
+  /**
+   * Reports which Python the plugin would use, as seen from the settings UI
+   * process. With no pythonPath it runs the plugin's auto-detection; with one,
+   * it applies the same validation and check the plugin does at startup.
+   */
+  async handleEnvCheck(payload = {}) {
+    const result = { minVersion: PYTHON_MIN_VERSION, hint: pythonInstallHint() };
+    const configured = typeof payload.pythonPath === 'string' ? payload.pythonPath.trim() : '';
+    if (!configured) {
+      const { found, rejected } = findPython(PLUGIN_DIR);
+      return {
+        ...result, source: 'auto', ok: Boolean(found), path: found?.path || '', version: found?.version || '',
+        rejected: rejected.map(describeRejection),
+        tooOld: rejected.some((r) => r.reason === 'too-old'),
+      };
+    }
+    const error = pythonPathError(configured);
+    if (error) return { ...result, source: 'configured', ok: false, path: configured, version: '', error };
+    const check = inspectPython(configured, PLUGIN_DIR);
+    return {
+      ...result, source: 'configured', ok: check.ok, path: configured, version: check.version,
+      reason: check.ok ? '' : describeRejection({ path: configured, ...check }),
+      tooOld: check.reason === 'too-old',
+    };
   }
 
   async handleInit() {

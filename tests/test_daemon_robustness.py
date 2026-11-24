@@ -180,8 +180,10 @@ class CoapTimeoutTests(unittest.TestCase):
 
     def test_create_times_out_and_releases_context(self):
         context = _FakeContext(_never_responds)
+        seen = {}
 
-        async def create_context():
+        async def create_context(**kwargs):
+            seen.update(kwargs)
             return context
 
         async def run():
@@ -193,6 +195,7 @@ class CoapTimeoutTests(unittest.TestCase):
 
         asyncio.run(run())
         self.assertTrue(context.shut_down, "failed connect leaked its CoAP context")
+        self.assertEqual(seen.get("transports"), coap_client.CLIENT_TRANSPORTS)
 
     def test_retries_are_bounded_by_overall_deadline(self):
         def failing(message):

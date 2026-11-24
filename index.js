@@ -10,15 +10,23 @@
  * - Commands (power, mode, light, etc.) are sent directly and are fast
  * - State reads use cached data from observe or poll updates (instant)
  *
- * The aioairctrl Python library is bundled in the aioairctrl/ directory.
- * Only aiocoap and pycryptodomex need to be installed (done by postinstall.sh).
+ * The aioairctrl Python library is bundled in the aioairctrl/ directory and
+ * its dependencies in vendor/, so only Python 3.11+ is needed (no install step).
  */
 
-const { spawn, execFileSync } = require('node:child_process');
+const { spawn } = require('node:child_process');
 const readline = require('node:readline');
 const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
+const {
+  PYTHON_MIN_VERSION,
+  describeRejection,
+  findPython,
+  inspectPython,
+  pythonInstallHint,
+  pythonPathError,
+} = require('./python-runtime');
 
 // Constants for device values
 const MODE = {
@@ -84,18 +92,6 @@ const AC1715_MANUAL_MODES = new Set(Object.keys(AC1715_MODE_TO_SPEED));
 
 // Restart backoff delays in ms
 const RESTART_DELAYS = [5000, 10000, 30000, 60000];
-const PYTHON_MIN_VERSION = '3.11';
-const [PYTHON_MIN_MAJOR, PYTHON_MIN_MINOR] = PYTHON_MIN_VERSION.split('.').map(Number);
-if (!Number.isInteger(PYTHON_MIN_MAJOR) || !Number.isInteger(PYTHON_MIN_MINOR)) {
-  throw new Error(`Invalid PYTHON_MIN_VERSION: ${PYTHON_MIN_VERSION}`);
-}
-const PYTHON_RUNTIME_CHECK = `
-import sys
-if sys.version_info < (${PYTHON_MIN_MAJOR}, ${PYTHON_MIN_MINOR}):
-    raise SystemExit(1)
-import aiocoap, Cryptodome
-`;
-
 // Python discovery runs blocking subprocesses, so do it once per plugin
 // directory rather than once per accessory.
 const pythonByPluginDir = new Map();
@@ -105,7 +101,6 @@ function findPythonCached(accessory, pluginDir) {
 }
 
 module.exports = (api) => {
-  api.registerAccessory('PhilipsAirPurifier', PhilipsAirPurifierLegacyAccessory);
   api.registerPlatform('PhilipsAirPurifier', PhilipsAirPurifierPlatform);
 };
 
@@ -123,6 +118,12 @@ function defaultAirplusTokenFile(api, deviceUuid) {
   const storageFile = path.join(storagePath, fileName);
   if (!fs.existsSync(storageFile) && fs.existsSync(legacyPath)) return legacyPath;
   return storageFile;
+}
+
+/** Python bytecode cache under the Homebridge storage dir, or '' if unknown. */
+function pycachePrefix(api) {
+  const storagePath = typeof api?.user?.storagePath === 'function' ? api.user.storagePath() : '';
+  return storagePath ? path.join(storagePath, 'philips-air-purifier', 'pycache') : '';
 }
 
 function resolvePlatformDevices(config, log) {
@@ -303,6 +304,11 @@ class DaemonHandler {
           PHILIPS_HOMEID_ENCRYPTION_KEY: options.homeIdEncryptionKey || '',
           // Ensure the bundled aioairctrl package is always importable
           PYTHONPATH: path.dirname(scriptPath),
+          // Keep bytecode caches out of the plugin directory (Homebridge
+          // Verified: write only inside the storage directory).
+          ...(options.pycachePrefix
+            ? { PYTHONPYCACHEPREFIX: options.pycachePrefix }
+            : { PYTHONDONTWRITEBYTECODE: '1' }),
         },
       });
       this.daemon = child;
@@ -554,7 +560,7 @@ class PhilipsAirPurifierAccessory {
       this.validatePythonPath(this.pythonPath);
     }
 
-    this.log.info(`Using Python: ${this.pythonPath}`);
+    if (this.pythonPath) this.log.info(`Using Python: ${this.pythonPath}`);
     this.log.info(`Using API script: ${this.apiScriptPath}`);
     this.log.info(`Using protocol: ${this.protocol}`);
 
@@ -603,51 +609,23 @@ class PhilipsAirPurifierAccessory {
     this.startDaemon();
   }
 
+  /** Returns a usable Python path, or null (after logging how to fix it). */
   findPython(pluginDir) {
-    const candidates = [
-      process.env.PHILIPS_AIR_PYTHON,
-      process.env.PYTHON,
-      process.env.PYTHON3,
-      path.join(pluginDir, '.venv', 'bin', 'python3'),
-      path.join(pluginDir, '.venv', 'bin', 'python3.12'),
-      path.join(pluginDir, 'venv', 'bin', 'python3'),
-      path.join(pluginDir, 'venv', 'bin', 'python3.12'),
-      '/usr/local/opt/python@3.12/bin/python3.12',
-      '/opt/homebrew/bin/python3.12',
-      '/opt/homebrew/bin/python3.13',
-      '/opt/homebrew/bin/python3.11',
-      '/usr/local/bin/python3.12',
-      '/usr/local/bin/python3.13',
-      '/usr/local/bin/python3.11',
-      '/usr/bin/python3.12',
-      '/usr/bin/python3.13',
-      '/usr/bin/python3.11',
-      '/volume1/@appstore/Python3.12/usr/local/bin/python3.12',
-      '/volume1/@appstore/py3k/usr/local/bin/python3',
-      'python3.13',
-      'python3.12',
-      'python3.11',
-      '/usr/bin/python3',
-      '/usr/local/bin/python3',
-      'python3',
-    ];
-
-    for (const pythonPath of candidates) {
-      if (!pythonPath) continue;
-      const isCommandName = !pythonPath.includes(path.sep);
-      if (!isCommandName && !fs.existsSync(pythonPath)) continue;
-      try {
-        // Check Python version plus CoAP and crypto deps. aioairctrl is bundled.
-        execFileSync(pythonPath, ['-c', PYTHON_RUNTIME_CHECK], { stdio: 'ignore' });
-        this.log.debug(`Found Python ${PYTHON_MIN_VERSION}+ with required dependencies: ${pythonPath}`);
-        return pythonPath;
-      } catch (_error) {
-        // Try the next candidate; this one is missing the required runtime or modules.
-      }
+    const { found, rejected } = findPython(pluginDir);
+    if (found) {
+      this.log.debug(`Found Python ${found.version}: ${found.path}`);
+      return found.path;
     }
-
-    this.log.warn(`Could not find Python ${PYTHON_MIN_VERSION}+ with aiocoap and pycryptodomex installed. Run: bash postinstall.sh`);
-    return 'python3';
+    const tooOld = rejected.some((r) => r.reason === 'too-old');
+    const why = rejected.length ? ` Checked: ${rejected.map(describeRejection).join('; ')}.` : '';
+    const fix = tooOld
+      ? `Install Python ${PYTHON_MIN_VERSION}+ alongside it and set "pythonPath" to it in the plugin settings`
+      : `Install it (${pythonInstallHint()}) and restart Homebridge, or set "pythonPath" in the plugin settings`;
+    this.log.error(
+      `No usable Python ${PYTHON_MIN_VERSION}+ was found, so Philips devices cannot connect.${why} ${fix}. ` +
+      'The Environment check in the plugin settings shows what was found.'
+    );
+    return null;
   }
 
   validateHost(host) {
@@ -666,21 +644,22 @@ class PhilipsAirPurifierAccessory {
   }
 
   validatePythonPath(pythonPath) {
-    if (/[;&|`$<>!]/.test(pythonPath)) {
-      throw new Error(`pythonPath contains invalid characters: "${pythonPath}"`);
-    }
-    if (path.isAbsolute(pythonPath) && !fs.existsSync(pythonPath)) {
-      throw new Error(`pythonPath does not exist: "${pythonPath}"`);
-    }
-    try {
-      execFileSync(pythonPath, ['-c', PYTHON_RUNTIME_CHECK], { stdio: 'ignore' });
-    } catch (error) {
-      throw new Error(`pythonPath must point to Python ${PYTHON_MIN_VERSION}+ with aiocoap and pycryptodomex installed: "${pythonPath}"`, { cause: error });
+    const syntaxError = pythonPathError(pythonPath);
+    if (syntaxError) throw new Error(syntaxError);
+    const result = inspectPython(pythonPath, __dirname);
+    if (!result.ok) {
+      throw new Error(`pythonPath is not usable: ${describeRejection({ path: pythonPath, ...result })}`);
     }
   }
 
   async startDaemon() {
     if (this._destroyed) return;
+    if (!this.pythonPath) {
+      // Already logged with the fix. Retrying can't help until Python is
+      // installed, so stay unresponsive instead of looping on restarts.
+      this.deviceReachable = false;
+      return;
+    }
     if (this.protocol === 'airplus-cloud' && !this.airplusDeviceUuid) {
       this.log.warn('airplus-cloud requires airplusDeviceUuid. Use Plugin Settings to run the Air+ Setup Wizard, or set airplusDeviceUuid manually.');
       this.deviceReachable = false;
@@ -696,6 +675,7 @@ class PhilipsAirPurifierAccessory {
         homeIdEncryptionKey: this.homeIdEncryptionKey,
         airplusDeviceUuid: this.airplusDeviceUuid,
         airplusTokenFile: this.airplusTokenFile,
+        pycachePrefix: pycachePrefix(this.api),
       });
       if (this._destroyed) {
         this.daemon.stop();
@@ -1446,65 +1426,7 @@ class PhilipsAirPurifierAccessory {
   }
 }
 
-class PhilipsAirPurifierLegacyAccessory {
-  constructor(log, config, api) {
-    this.accessory = null;
-
-    if (process.env.PHILIPS_AIR_ALLOW_LEGACY_ACCESSORY !== '1') {
-      log.error('[PhilipsAir] Legacy accessories[] config detected and will not be loaded. Move this entry into platforms[].devices[] and remove the top-level accessories[] entry. Set PHILIPS_AIR_ALLOW_LEGACY_ACCESSORY=1 only as a temporary rollback.');
-      return;
-    }
-
-    log.warn('[PhilipsAir] Legacy accessories[] config enabled by PHILIPS_AIR_ALLOW_LEGACY_ACCESSORY=1. This compatibility path is deprecated; migrate to platforms[].devices[].');
-    this.accessory = new PhilipsAirPurifierAccessory(log, config, api, new LegacyPlatformAccessory(api));
-  }
-
-  getServices() {
-    return this.accessory ? this.accessory.platformAcc.getServices() : [];
-  }
-
-  identify() {
-    if (this.accessory) {
-      this.accessory.identify();
-    }
-  }
-}
-
-class LegacyPlatformAccessory {
-  constructor(api) {
-    this.Service = api.hap.Service;
-    this.services = [];
-    this.context = {};
-    this.informationService = new this.Service.AccessoryInformation();
-    this.services.push(this.informationService);
-  }
-
-  getService(serviceType) {
-    return this.services.find((service) => service instanceof serviceType);
-  }
-
-  getServiceById(serviceType, subtype) {
-    return this.services.find((service) => service instanceof serviceType && service.subtype === subtype);
-  }
-
-  addService(serviceOrType, name, subtype) {
-    const service = typeof serviceOrType === 'function'
-      ? new serviceOrType(name, subtype)
-      : serviceOrType;
-    this.services.push(service);
-    return service;
-  }
-
-  removeService(service) {
-    const index = this.services.indexOf(service);
-    if (index !== -1) this.services.splice(index, 1);
-  }
-
-  getServices() {
-    return this.services;
-  }
-}
-
 module.exports._DaemonHandler = DaemonHandler;
 module.exports._PhilipsAirPurifierAccessory = PhilipsAirPurifierAccessory;
 module.exports._defaultAirplusTokenFile = defaultAirplusTokenFile;
+module.exports._pycachePrefix = pycachePrefix;

@@ -6,6 +6,69 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [5.0.0] — 24/11/2026
+
+Install is now zero-touch: no install scripts, no pip, no virtual environment. The only
+requirement is Python 3.11+, which most Linux-based Homebridge hosts already have.
+This release prepares the plugin for Homebridge Verified status. Every protocol, HomeKit service
+and config option from 4.3.0 works as before.
+
+### Breaking
+
+- **Install scripts removed.** `preinstall.sh` and `postinstall.sh` are gone, and so is the
+  plugin-local `.venv`. The Python dependencies are bundled instead (see Changed). Homebridge
+  Verified forbids install scripts that modify the user's system.
+- **Legacy `accessories[]` mode removed.** It has been disabled by default since v3.2.3. The
+  `PHILIPS_AIR_ALLOW_LEGACY_ACCESSORY=1` rollback no longer exists. A leftover entry makes
+  Homebridge log `No plugin was found for the accessory "PhilipsAirPurifier"` and carry on.
+  Move it to `platforms[].devices[]` (see README).
+- **`PHILIPS_AIR_SKIP_PYTHON_PREINSTALL` and npm's `--python` option** no longer do anything, as
+  there's no install step. Use `pythonPath` or `PHILIPS_AIR_PYTHON` to pick a Python.
+- **Custom `apiScriptPath`:** a replacement script now needs the plugin's `aioairctrl/` and
+  `vendor/` folders beside it, and a copy of an old v4 script that imports `Cryptodome` won't run.
+  Leave `apiScriptPath` blank unless you maintain your own script.
+
+### Changed
+
+- **Bundled dependencies:** `aiocoap` 0.4.17 and `paho-mqtt` 2.1.0 now ship in `vendor/`. They're
+  pinned in `requirements.txt` together with the sha256 of each published wheel.
+  `scripts/vendor.py` installs those wheels with `pip --require-hashes` and checks every file
+  against the wheel's RECORD. CI rebuilds `vendor/` the same way and fails on any added, missing
+  or modified file. Licences, including paho-mqtt's EDL-1.0 text, are listed in
+  `THIRD_PARTY_NOTICES.md`.
+- **pycryptodomex replaced** by a pure-Python AES-CBC (`aioairctrl/aes.py`). It's tested against
+  FIPS-197 and SP 800-38A vectors, and against outputs recorded from the v4.3.0 code for CoAP
+  encryption, HomeID AES and the full HTTP DH/AES client (key exchange, command encryption and
+  reply decryption). Encrypted traffic is byte-for-byte identical.
+- **CoAP transports are pinned** to the set the v4 virtual environment always used (TCP, TLS and
+  UDP). On the system Python, aiocoap would otherwise pick transports based on whatever optional
+  packages the host has installed, and an old system `websockets` package stops CoAP connecting.
+- **Node.js 22, 24 and 26** are supported (was 24+ only). CI runs the tests on each Node version
+  with Python 3.11 and 3.14, without pip-installing anything the tests need. It also installs the
+  packed tarball on Linux and macOS and starts the real daemon for each local protocol.
+- **Python detection** moved to `python-runtime.js`, shared by the plugin and the settings UI. It
+  also finds `python` and the `py` launcher on Windows.
+- **No bytecode in the plugin folder:** the daemon's `__pycache__` now goes to
+  `<Homebridge storage>/philips-air-purifier/pycache`, as Homebridge Verified requires.
+- **Packaging for Homebridge Verified:** `homebridge` is a dev dependency only (it was a peer
+  dependency), `package.json` has a `homepage`, and `config.schema.json` uses a schema-level
+  `required` list instead of per-field `"required": true/false`.
+
+### Added
+
+- **Environment panel** in Plugin Settings: shows which Python each device will use and, when
+  none is usable, why (for example "Python 3.10.12, older than 3.11") and how to fix it.
+
+### Fixed
+
+- **No Python, no retry loop:** a missing Python used to restart the daemon every 5–60 s forever.
+  The plugin now logs one error with the reason and the fix, and leaves the accessories Not
+  Responding until Homebridge restarts.
+- **Python too old:** a clear message instead of a traceback, both in the log and from the CLI.
+- **A broken aiocoap only disables CoAP:** HTTP, HomeID and Air+ devices keep working.
+
+---
+
 ## [4.3.0] — 23/11/2026
 
 ### Fixed

@@ -230,6 +230,16 @@
 
     <div id="status" class="status"></div>
 
+    <!-- Environment check -->
+    <div class="panel">
+      <h2>Environment</h2>
+      <div class="meta" style="margin-bottom: 8px;">Python as seen by the settings UI. Homebridge itself normally sees the same, unless it runs with a different PATH.</div>
+      <div id="env-results" aria-live="polite"><div class="meta">Checking Python…</div></div>
+      <div class="toolbar" style="margin-top: 10px; margin-bottom: 0;">
+        <button id="env-check-btn" type="button" class="secondary">Check Again</button>
+      </div>
+    </div>
+
     <!-- Platform name -->
     <div class="panel">
       <div class="field">
@@ -623,6 +633,55 @@
       }
     }
 
+    // ---------- environment check ----------
+    // Checks the Python each device will use: auto-detected unless the
+    // device sets a Python Path. Results are built with textContent only.
+    async function checkEnvironment() {
+      const btn = document.getElementById('env-check-btn');
+      const out = document.getElementById('env-results');
+      btn.disabled = true;
+      try {
+        const devices = collectDevices();
+        const targets = [...new Set(devices.map(d => d.pythonPath || ''))];
+        if (targets.length === 0) targets.push('');
+        const results = await Promise.all(
+          targets.map(pythonPath => homebridge.request('/env/check', { pythonPath }))
+        );
+        out.replaceChildren(...results.map(renderEnvResult));
+      } catch (err) {
+        const row = document.createElement('div');
+        row.className = 'status error';
+        row.textContent = 'Environment check failed: ' + (err.message || String(err));
+        out.replaceChildren(row);
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    function renderEnvResult(r) {
+      const row = document.createElement('div');
+      row.className = 'status ' + (r.ok ? 'success' : 'error');
+      row.style.marginBottom = '8px';
+      const where = r.source === 'auto' ? 'auto-detected' : 'from Python Path';
+      if (r.ok) {
+        row.textContent = `✓ Python ${r.version} at ${r.path} (${where}). Ready.`;
+      } else if (r.error) {
+        row.textContent = `✗ ${r.error}`;
+      } else if (r.source === 'auto') {
+        const checked = r.rejected && r.rejected.length ? ` Checked: ${r.rejected.join('; ')}.` : '';
+        const fix = r.tooOld
+          ? `Install Python ${r.minVersion}+ alongside it and set Python Path on the device`
+          : `${r.hint}, then restart Homebridge, or set Python Path on the device`;
+        row.textContent = `✗ No usable Python ${r.minVersion}+ found.${checked} ${fix}.`;
+      } else {
+        const fix = r.tooOld
+          ? `Point Python Path at Python ${r.minVersion}+ instead`
+          : `Check the path, or ${r.hint.replace(/^[^:]+: /, '')}`;
+        row.textContent = `✗ ${r.reason}. ${fix}, or clear Python Path to auto-detect.`;
+      }
+      return row;
+    }
+
     // ---------- Air+ OAuth ----------
     function req(path, body) {
       return homebridge.request(path, body || {}).catch((err) => {
@@ -789,6 +848,7 @@
     });
 
     document.getElementById('save-btn').addEventListener('click', saveConfig);
+    document.getElementById('env-check-btn').addEventListener('click', checkEnvironment);
 
     document.getElementById('airplus-send-code').addEventListener('click', sendAirplusCode);
     document.getElementById('airplus-verify-code').addEventListener('click', verifyAirplusCode);
@@ -812,7 +872,9 @@
     emptyState.textContent = 'No devices configured. Click "+ Add Device" to add your first purifier.';
     document.getElementById('device-list').appendChild(emptyState);
 
-    loadConfig().catch(err => showStatus('Failed to load config: ' + err.message, 'error'));
+    loadConfig()
+      .catch(err => showStatus('Failed to load config: ' + err.message, 'error'))
+      .finally(checkEnvironment);
   </script>
 </body>
 </html>

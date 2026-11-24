@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import sys
 
 from aioairctrl.coap import aiocoap_monkeypatch  # noqa: F401
 from aiocoap import (
@@ -15,6 +16,12 @@ from aiocoap import (
 from aioairctrl.coap.encryption import EncryptionContext
 
 logger = logging.getLogger(__name__)
+
+# The daemon runs on the system Python, where aiocoap's default transport list
+# depends on which optional packages happen to be installed (websockets,
+# DTLSSocket, cryptography...). An old system websockets, for example, makes
+# context creation fail. Pin the set the v4 isolated venv always got.
+CLIENT_TRANSPORTS = ["tcpclient", "tlsclient", "udp6" if sys.platform == "linux" else "simple6"]
 
 
 class Client:
@@ -35,7 +42,7 @@ class Client:
         self._encryption_context = None
 
     async def _init(self):
-        self._client_context = await Context.create_client_context()
+        self._client_context = await Context.create_client_context(transports=CLIENT_TRANSPORTS)
         self._encryption_context = EncryptionContext()
         await self._sync()
 

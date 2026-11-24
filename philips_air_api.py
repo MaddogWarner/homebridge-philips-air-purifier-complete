@@ -8,17 +8,24 @@ Supports two modes:
    Uses CoAP Observe or HTTP polling depending on the selected protocol.
 
 Note: aioairctrl is bundled in the aioairctrl/ directory alongside this script.
-      aiocoap and pycryptodomex must be installed (handled by postinstall.sh).
+      aiocoap and paho-mqtt are bundled in vendor/; AES is pure Python, so only
+      the Python standard library is needed.
 """
-import asyncio
-import argparse
+import sys
+
+# Checked before anything else: on older Pythons the bundled aiocoap fails
+# with an obscure TypeError instead of a clear message.
+if sys.version_info < (3, 11):  # keep in step with PYTHON_MIN_VERSION in python-runtime.js
+    sys.exit(f"Python 3.11 or newer is required; this is Python {sys.version.split()[0]}.")
+
+import asyncio  # noqa: E402
+import argparse  # noqa: E402
 import base64
 import hashlib
 import json
 import os
 import secrets
 import ssl
-import sys
 import signal
 import tempfile
 import threading
@@ -29,20 +36,15 @@ import urllib.request
 import uuid
 from typing import Dict, Any, Optional
 
-try:
-    from Cryptodome.Cipher import AES
-    from Cryptodome.Util.Padding import pad, unpad
-    CRYPTO_AVAILABLE = True
-except ModuleNotFoundError:
-    AES = None
-    pad = None
-    unpad = None
-    CRYPTO_AVAILABLE = False
+# Importing aioairctrl also puts the bundled vendor/ packages (aiocoap,
+# paho-mqtt) on sys.path, so it must come before those imports.
+from aioairctrl.aes import AES, pad, unpad
 
 try:
     from aioairctrl.coap.client import Client
     COAP_AVAILABLE = True
-except ModuleNotFoundError:
+except ImportError:
+    # Only the CoAP protocol needs aiocoap; HTTP, HomeID and Air+ keep working.
     Client = None
     COAP_AVAILABLE = False
 
@@ -269,11 +271,6 @@ def _socket_timeout(deadline: Optional[float], default: float = 10) -> float:
     return min(default, remaining)
 
 
-def _require_crypto():
-    if not CRYPTO_AVAILABLE:
-        raise RuntimeError("pycryptodomex is required for Philips encrypted HTTP support")
-
-
 def _require_coap():
     if not COAP_AVAILABLE:
         raise RuntimeError("aiocoap is required for Philips CoAP support")
@@ -434,14 +431,12 @@ class PhilipsAirHTTPClient:
         return self._session_key
 
     def _encrypt(self, values: Dict[str, Any]) -> bytes:
-        _require_crypto()
         data = "AA" + json.dumps(values)
         cipher = AES.new(self._require_session_key(), AES.MODE_CBC, iv=bytes(16))
         return base64.b64encode(cipher.encrypt(pad(data.encode(), 16, style="pkcs7")))
 
     def _decrypt(self, data: bytes) -> Dict[str, Any]:
         try:
-            _require_crypto()
             cipher = AES.new(self._require_session_key(), AES.MODE_CBC, iv=bytes(16))
             decrypted = unpad(cipher.decrypt(base64.b64decode(data)), 16, style="pkcs7")[2:]
             return json.loads(decrypted)
@@ -482,7 +477,6 @@ class PhilipsAirHTTPClient:
         shared_key = shared_secret.to_bytes(128, byteorder="big")[:16]
 
         encrypted_key = base64.b64decode(response["key"])
-        _require_crypto()
         cipher = AES.new(shared_key, AES.MODE_CBC, iv=bytes(16))
         self._session_key = unpad(cipher.decrypt(encrypted_key), 16, style="pkcs7")[:16]
 
@@ -540,7 +534,6 @@ class HomeIDAESCrypto:
 
     @staticmethod
     def encrypt(values: Dict[str, Any], hex_key: str) -> bytes:
-        _require_crypto()
         key = HomeIDAESCrypto._hex_to_key(hex_key)
         plaintext = json.dumps(values).encode("utf-8")
         cipher = AES.new(key, AES.MODE_CBC, iv=bytes(16))
@@ -548,7 +541,6 @@ class HomeIDAESCrypto:
 
     @staticmethod
     def decrypt(data: bytes, hex_key: str) -> str:
-        _require_crypto()
         key = HomeIDAESCrypto._hex_to_key(hex_key)
         cipher = AES.new(key, AES.MODE_CBC, iv=bytes(16))
         plaintext = unpad(cipher.decrypt(base64.b64decode(data.strip())), 16, style="pkcs7")
@@ -737,7 +729,7 @@ class AirPlusCloudClient:
         if _paho_mqtt is None:
             raise ImportError(
                 "paho-mqtt is required for airplus-cloud protocol. "
-                "Run: pip install 'paho-mqtt>=2.1'"
+                "The bundled copy in vendor/ is missing; reinstall the plugin."
             )
         self._uuid = device_uuid
         self._device_id = f"da-{device_uuid}" if not device_uuid.startswith("da-") else device_uuid

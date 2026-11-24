@@ -10,8 +10,9 @@ const path = require('node:path');
 // Replace spawn with a factory of fake child processes before index.js
 // captures it.
 const children = [];
-function makeChild() {
+function makeChild(spawnOptions) {
   const child = new EventEmitter();
+  child.spawnOptions = spawnOptions;
   child.stdin = new PassThrough();
   child.stdout = new PassThrough();
   child.stderr = new PassThrough();
@@ -30,7 +31,7 @@ function makeChild() {
 const realLoad = Module._load;
 Module._load = function (request, ...rest) {
   if (request === 'node:child_process') {
-    return { ...realLoad.call(this, request, ...rest), spawn: () => makeChild() };
+    return { ...realLoad.call(this, request, ...rest), spawn: (_cmd, _args, opts) => makeChild(opts) };
   }
   return realLoad.call(this, request, ...rest);
 };
@@ -173,7 +174,7 @@ test('one invalid device does not stop the others from loading', (t) => {
   t.mock.method(Accessory.prototype, 'startDaemon', () => {});
 
   let PlatformClass;
-  plugin({ registerAccessory() {}, registerPlatform: (_name, cls) => { PlatformClass = cls; } });
+  plugin({ registerPlatform: (_name, cls) => { PlatformClass = cls; } });
   new PlatformClass(log, {
     devices: [
       { name: 'Bad', host: 'purifier.local' },
@@ -211,4 +212,33 @@ test('Air+ token defaults to Homebridge storage, falling back to an existing leg
 
   fs.writeFileSync(current, '{}');
   assert.equal(defaultTokenFile(api, 'dev1'), current);
+});
+
+test('the plugin registers only a dynamic platform (Homebridge Verified requirement)', () => {
+  const calls = [];
+  plugin({
+    registerAccessory: (name) => calls.push(['accessory', name]),
+    registerPlatform: (name) => calls.push(['platform', name]),
+  });
+  assert.deepEqual(calls, [['platform', 'PhilipsAirPurifier']]);
+});
+
+test('Python bytecode goes to the storage dir, never the plugin dir', () => {
+  const { _pycachePrefix: pycachePrefix } = plugin;
+  assert.equal(pycachePrefix({ user: { storagePath: () => '/hb' } }), path.join('/hb', 'philips-air-purifier', 'pycache'));
+  assert.equal(pycachePrefix({}), '');
+
+  const withPrefix = new DaemonHandler(quietLog, null, () => {}, null);
+  withPrefix.start('python3', '/x/philips_air_api.py', '10.0.0.1', { pycachePrefix: '/hb/pyc' }).catch(() => {});
+  const env1 = children.at(-1).spawnOptions.env;
+  assert.equal(env1.PYTHONPYCACHEPREFIX, '/hb/pyc');
+  assert.equal(env1.PYTHONDONTWRITEBYTECODE, undefined);
+  children.at(-1).die(1);
+
+  const noPrefix = new DaemonHandler(quietLog, null, () => {}, null);
+  noPrefix.start('python3', '/x/philips_air_api.py', '10.0.0.1').catch(() => {});
+  const env2 = children.at(-1).spawnOptions.env;
+  assert.equal(env2.PYTHONDONTWRITEBYTECODE, '1');
+  assert.equal(env2.PYTHONPYCACHEPREFIX, undefined);
+  children.at(-1).die(1);
 });
