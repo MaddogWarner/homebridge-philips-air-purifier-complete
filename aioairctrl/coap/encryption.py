@@ -29,7 +29,10 @@ class EncryptionContext:
         self._client_key = client_key_next
 
     def _create_cipher(self, key: str):
-        key_and_iv = hashlib.md5((self.SECRET_KEY + key).encode()).hexdigest().upper()
+        # MD5 key derivation is fixed by the Philips CoAP protocol; it is not a choice.
+        key_and_iv = hashlib.md5(  # nosemgrep: python.lang.security.insecure-hash-algorithms-md5.insecure-hash-algorithm-md5  # noqa: E501
+            (self.SECRET_KEY + key).encode(), usedforsecurity=False
+        ).hexdigest().upper()
         half_keylen = len(key_and_iv) // 2
         secret_key = key_and_iv[0:half_keylen]
         iv = key_and_iv[half_keylen:]

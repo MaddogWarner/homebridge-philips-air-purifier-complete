@@ -41,7 +41,8 @@ def http_get(url: str) -> Tuple[bool, int, str]:
     """
     req = urllib.request.Request(url, headers={"Content-Type": "application/json"})
     try:
-        with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+        # URL is built from a fixed http:// prefix and a device IP.
+        with urllib.request.urlopen(req, timeout=TIMEOUT) as r:  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected  # noqa: E501
             return True, r.status, "OK"
     except urllib.error.HTTPError as e:
         # HTTP errors (401, 404, etc.) still mean the device is reachable

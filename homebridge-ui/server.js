@@ -454,7 +454,8 @@ class AirPlusSetupServer extends HomebridgePluginUiServer {
     } catch (_e) {
       // Fall through to regex for custom schemes and malformed relative URLs.
     }
-    const match = String(value || '').match(new RegExp('[?&#]' + param + '=([^&\\s"\'\\\\]+)'));
+    // param is always a literal name from this file ('code', 'state', 'context').
+    const match = String(value || '').match(new RegExp('[?&#]' + param + '=([^&\\s"\'\\\\]+)')); // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
     return match ? decodeURIComponent(match[1]) : null;
   }
 

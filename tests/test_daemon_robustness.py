@@ -828,3 +828,20 @@ class AirPlusMessageErrorTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class UrlopenSchemeTests(unittest.TestCase):
+    def test_non_http_schemes_are_refused_before_opening(self):
+        import urllib.request
+        with mock.patch.object(urllib.request, "urlopen") as urlopen:
+            for url in ("file:///etc/passwd", "ftp://example.com/x"):
+                with self.assertRaises(ValueError):
+                    api._urlopen(urllib.request.Request(url))
+            urlopen.assert_not_called()
+
+    def test_http_and_https_are_passed_through(self):
+        import urllib.request
+        with mock.patch.object(urllib.request, "urlopen", return_value="ok") as urlopen:
+            for url in ("http://192.0.2.1/di/v1/products/1/air", "https://example.com/token"):
+                self.assertEqual(api._urlopen(urllib.request.Request(url), timeout=1), "ok")
+            self.assertEqual(urlopen.call_count, 2)

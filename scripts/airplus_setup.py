@@ -94,7 +94,8 @@ def _exchange_code(code: str, code_verifier: str) -> dict:
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req, timeout=15) as r:
+        # URL is a fixed https:// Philips endpoint constant.
+        with urllib.request.urlopen(req, timeout=15) as r:  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected  # noqa: E501
             return json.loads(r.read())
     except urllib.error.HTTPError as e:
         body = e.read().decode(errors="replace")
@@ -111,7 +112,8 @@ def _api_get(path: str, access_token: str) -> dict:
         },
     )
     try:
-        with urllib.request.urlopen(req, timeout=15) as r:
+        # URL is a fixed https:// Philips endpoint constant.
+        with urllib.request.urlopen(req, timeout=15) as r:  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected  # noqa: E501
             return json.loads(r.read())
     except urllib.error.HTTPError as e:
         body = e.read().decode(errors="replace")

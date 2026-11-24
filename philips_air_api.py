@@ -24,6 +24,7 @@ import tempfile
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 from typing import Dict, Any, Optional
@@ -238,6 +239,22 @@ async def _run_within(coro, budget: float) -> Any:
         raise
 
 
+_ALLOWED_URL_SCHEMES = ("http", "https")
+
+
+def _urlopen(request: urllib.request.Request, **kwargs):
+    """``urllib.request.urlopen`` restricted to http and https.
+
+    Every URL the plugin opens is built from a fixed http:// or https:// prefix,
+    but urllib would also honour file:// and other schemes, so enforce it here.
+    """
+    scheme = urllib.parse.urlsplit(request.full_url).scheme.lower()
+    if scheme not in _ALLOWED_URL_SCHEMES:
+        raise ValueError(f"Refusing to open a {scheme or 'scheme-less'} URL")
+    # Scheme checked above.
+    return urllib.request.urlopen(request, **kwargs)  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected  # noqa: E501
+
+
 def _socket_timeout(deadline: Optional[float], default: float = 10) -> float:
     """Timeout for one blocking device request, capped by a monotonic deadline.
 
@@ -446,7 +463,7 @@ class PhilipsAirHTTPClient:
             headers={"Content-Type": "application/json"},
         )
         try:
-            with urllib.request.urlopen(request, timeout=timeout) as response:
+            with _urlopen(request, timeout=timeout) as response:
                 return response.read()
         except urllib.error.HTTPError as e:
             raise ConnectionError(f"HTTP {method} {path} failed with status {e.code}") from e
@@ -618,7 +635,7 @@ class PhilipsHomeIDHTTPClient:
             headers=self._headers(),
         )
         try:
-            with urllib.request.urlopen(
+            with _urlopen(
                 request, timeout=timeout, context=self._ssl_context
             ) as response:
                 return self._decode_body(response.read(), port_name)
@@ -702,7 +719,7 @@ class PhilipsHomeIDHTTPClient:
                 url = self._url(port_name, product_id)
                 request = urllib.request.Request(url, method="GET", headers={"Content-Type": "application/json"})
                 try:
-                    with urllib.request.urlopen(request, timeout=5, context=self._ssl_context) as response:
+                    with _urlopen(request, timeout=5, context=self._ssl_context) as response:
                         result["reachable"] = True
                         result["endpoints"][f"{product_id}/{port_name}"] = response.status
                 except urllib.error.HTTPError as e:
@@ -868,7 +885,7 @@ class AirPlusCloudClient:
                 "Accept": "application/json",
             },
         )
-        with urllib.request.urlopen(req, timeout=10) as r:
+        with _urlopen(req, timeout=10) as r:
             return json.loads(r.read())
 
     def _refresh_token(self):
@@ -891,7 +908,7 @@ class AirPlusCloudClient:
                 },
                 method="POST",
             )
-            with urllib.request.urlopen(req, timeout=10) as r:
+            with _urlopen(req, timeout=10) as r:
                 resp = json.loads(r.read())
             self._tokens["access_token"] = resp["access_token"]
             if "refresh_token" in resp:
@@ -944,7 +961,7 @@ class AirPlusCloudClient:
             )
 
             try:
-                with urllib.request.urlopen(req, timeout=10) as r:
+                with _urlopen(req, timeout=10) as r:
                     result = json.loads(r.read())
                 break
             except urllib.error.HTTPError as e:
