@@ -46,10 +46,17 @@ jobs:
         run: bandit -r philips_air_api.py aioairctrl scripts -ll --quiet --skip B310,B324
 
       # Findings are published to Code Scanning rather than failing the build.
+      # The MD5 rule is excluded for the same reason as Bandit's B324 above.
+      # Semgrep keeps `nosemgrep`-suppressed findings in its SARIF output and
+      # Code Scanning shows them as open, so they are filtered out before upload.
       - name: Semgrep
         run: |
           pip install semgrep
-          semgrep --config=p/default --config=p/secrets --config=p/owasp-top-ten --sarif --output semgrep.sarif --quiet
+          semgrep --config=p/default --config=p/secrets --config=p/owasp-top-ten \
+            --exclude-rule python.lang.security.insecure-hash-algorithms-md5.insecure-hash-algorithm-md5 \
+            --sarif --output semgrep-raw.sarif --quiet
+          jq '.runs[].results |= map(select((.suppressions // []) | length == 0))' \
+            semgrep-raw.sarif > semgrep.sarif
 
       - name: Upload Semgrep results
         if: always()
