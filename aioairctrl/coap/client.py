@@ -62,9 +62,13 @@ class Client:
             await self._client_context.shutdown()
 
     async def _response(self, request, path):
+        # asyncio.timeout, not wait_for: on Python 3.11 wait_for can swallow the
+        # cancellation from the enclosing CONTROL_DEADLINE when it coincides
+        # with a reply arriving, so retries ran past the deadline.
         try:
-            return await asyncio.wait_for(request.response, timeout=self.REQUEST_TIMEOUT)
-        except asyncio.TimeoutError:
+            async with asyncio.timeout(self.REQUEST_TIMEOUT):
+                return await request.response
+        except TimeoutError:
             raise TimeoutError(
                 f"No CoAP response from {self.host}:{self.port}{path} "
                 f"within {self.REQUEST_TIMEOUT}s"
