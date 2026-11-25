@@ -3,5 +3,5 @@
 # aiocoap is pinned below 0.5: the bundled monkeypatches must be re-validated
 # before any upgrade (see aioairctrl/coap/aiocoap_monkeypatch.py).
 aiocoap>=0.4.17,<0.5
-pycryptodomex>=3.23,<4
+pycryptodomex>=3.24.2,<4
 paho-mqtt>=2.1,<3
