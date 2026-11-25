@@ -8,7 +8,7 @@ module.exports = [
       'venv/**',
       'node_modules/**',
       '.claude/**',
-      'homebridge-ui/**',
+      'homebridge-ui/public/**',
       'test-*.cjs',
     ],
   },

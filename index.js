@@ -96,10 +96,34 @@ if sys.version_info < (${PYTHON_MIN_MAJOR}, ${PYTHON_MIN_MINOR}):
 import aiocoap, Cryptodome
 `;
 
+// Python discovery runs blocking subprocesses, so do it once per plugin
+// directory rather than once per accessory.
+const pythonByPluginDir = new Map();
+function findPythonCached(accessory, pluginDir) {
+  if (!pythonByPluginDir.has(pluginDir)) pythonByPluginDir.set(pluginDir, accessory.findPython(pluginDir));
+  return pythonByPluginDir.get(pluginDir);
+}
+
 module.exports = (api) => {
   api.registerAccessory('PhilipsAirPurifier', PhilipsAirPurifierLegacyAccessory);
   api.registerPlatform('PhilipsAirPurifier', PhilipsAirPurifierPlatform);
 };
+
+/**
+ * Default Air+ token path: Homebridge's storage directory, so the token is
+ * included in Homebridge backups and survives container re-creation.
+ * Falls back to the pre-4.3 location (~/.homebridge) when a token exists
+ * only there, so existing setups keep working without re-running setup.
+ */
+function defaultAirplusTokenFile(api, deviceUuid) {
+  const fileName = `philips-airplus-${deviceUuid}.json`;
+  const legacyPath = path.join(os.homedir(), '.homebridge', fileName);
+  const storagePath = typeof api?.user?.storagePath === 'function' ? api.user.storagePath() : '';
+  if (!storagePath) return legacyPath;
+  const storageFile = path.join(storagePath, fileName);
+  if (!fs.existsSync(storageFile) && fs.existsSync(legacyPath)) return legacyPath;
+  return storageFile;
+}
 
 function resolvePlatformDevices(config, log) {
   const devices = parseDeviceArray(config.devices, log, 'devices');
@@ -170,11 +194,24 @@ class PhilipsAirPurifierPlatform {
       const uuid = this.api.hap.uuid.generate(seed);
       activeUUIDs.add(uuid);
 
-      let platformAcc = this._cachedAccessories.get(uuid);
-      if (platformAcc) {
+      const cachedAcc = this._cachedAccessories.get(uuid);
+      const platformAcc = cachedAcc || new this.api.platformAccessory(deviceConfig.name, uuid);
+
+      // One misconfigured device must not stop the others from loading.
+      // A cached accessory is kept (not treated as stale) so a config typo
+      // doesn't wipe its rooms and automations; a new one is only
+      // registered once it has been set up successfully.
+      let acc;
+      try {
+        acc = new PhilipsAirPurifierAccessory(this.log, deviceConfig, this.api, platformAcc);
+      } catch (error) {
+        this.log.error(`[PhilipsAir] Device "${deviceConfig.name || 'Unnamed'}" not loaded: ${error.message}`);
+        continue;
+      }
+
+      if (cachedAcc) {
         this.log.info(`[PhilipsAir] Restoring cached accessory: ${deviceConfig.name}`);
       } else {
-        platformAcc = new this.api.platformAccessory(deviceConfig.name, uuid);
         this.api.registerPlatformAccessories(
           'homebridge-philips-air-purifier-complete',
           'PhilipsAirPurifier',
@@ -184,7 +221,6 @@ class PhilipsAirPurifierPlatform {
       }
 
       platformAcc.context.device = { ...deviceConfig };
-      const acc = new PhilipsAirPurifierAccessory(this.log, deviceConfig, this.api, platformAcc);
       this._activeAccessories.push(acc);
       this._cachedAccessories.set(uuid, platformAcc);
     }
@@ -236,6 +272,9 @@ class DaemonHandler {
   }
 
   async start(pythonPath, scriptPath, host, options = {}) {
+    // Never leave an earlier process running behind a new one.
+    if (this.daemon) this._killChild(this.daemon);
+
     return new Promise((resolve, reject) => {
       const protocol = options.protocol || 'coap';
       const args = [scriptPath, host, '--daemon'];
@@ -252,7 +291,7 @@ class DaemonHandler {
 
       this.log.info(`Starting ${protocol} daemon: ${pythonPath} ${args.join(' ')}`);
 
-      this.daemon = spawn(pythonPath, args, {
+      const child = spawn(pythonPath, args, {
         stdio: ['pipe', 'pipe', 'pipe'],
         env: {
           PATH: process.env.PATH,
@@ -266,49 +305,70 @@ class DaemonHandler {
           PYTHONPATH: path.dirname(scriptPath),
         },
       });
+      this.daemon = child;
 
-      this.daemon.stdin.on('error', (err) => {
+      // Startup settles exactly once: on ready, on timeout, or when the
+      // process dies first. A pre-ready failure is reported only through
+      // the rejection (the caller schedules the restart), never also
+      // through onExit, so a crash-looping daemon gets one restart chain.
+      let settled = false;
+      const settle = (error, connected) => {
+        if (settled) return;
+        settled = true;
+        if (this._startingChild === child) {
+          this._startingChild = null;
+          this._abortStart = null;
+        }
+        clearTimeout(timeout);
+        rl.removeListener('line', readyHandler);
+        if (error) reject(error);
+        else resolve(connected);
+      };
+
+      child.stdin.on('error', (err) => {
         this.log.debug(`Daemon stdin error: ${err.message}`);
       });
 
-      this.daemon.on('error', (err) => {
+      child.on('error', (err) => {
         this.log.error(`Daemon process error: ${err.message}`);
-        this.connected = false;
-        this.observing = false;
+        if (this.daemon !== child) return;
+        if (!settled) {
+          this._detachChild();
+          settle(err);
+        }
       });
 
-      this.daemon.on('exit', (code, signal) => {
+      child.on('exit', (code, signal) => {
+        // Exit of a process that was stopped or replaced: nothing to do.
+        if (this.daemon !== child) return;
         this.log.warn(`Daemon exited (code=${code}, signal=${signal})`);
-        this.connected = false;
-        this.observing = false;
-        this.daemon = null;
-
-        for (const [, { reject: rej }] of this.pendingRequests) {
-          rej(new Error('Daemon exited'));
+        this._detachChild();
+        if (!settled) {
+          settle(new Error(`Daemon exited before ready (code=${code}, signal=${signal})`));
+          return;
         }
-        this.pendingRequests.clear();
-
         if (this.onExit) this.onExit();
       });
 
-      this.daemon.stderr.on('data', (data) => {
+      child.stderr.on('data', (data) => {
         this.log.debug(`Daemon stderr: ${data.toString().trim()}`);
       });
 
-      this.rl = readline.createInterface({ input: this.daemon.stdout, terminal: false });
-      this.rl.on('line', (line) => this.handleMessage(line));
+      const rl = readline.createInterface({ input: child.stdout, terminal: false });
+      this.rl = rl;
+      rl.on('line', (line) => {
+        if (this.daemon === child) this.handleMessage(line);
+      });
 
       const timeout = setTimeout(() => {
-        this.rl.removeListener('line', readyHandler);
-        reject(new Error('Daemon startup timeout'));
+        settle(new Error('Daemon startup timeout'));
+        if (this.daemon === child) this._killChild(child);
       }, 20000);
 
       const readyHandler = (line) => {
         try {
           const response = JSON.parse(line);
           if (response.type === 'ready') {
-            clearTimeout(timeout);
-            this.rl.removeListener('line', readyHandler);
             this.connected = response.connected;
             this._notifyModelId(response.model_id);
             if (response.connected) {
@@ -316,29 +376,53 @@ class DaemonHandler {
             } else {
               this.log.warn(`Daemon ready but not connected: ${response.error}`);
             }
-            resolve(response.connected);
+            settle(null, response.connected);
           }
         } catch (_error) {
           // Ignore non-JSON daemon output while waiting for the ready message.
         }
       };
 
-      this.rl.on('line', readyHandler);
+      rl.on('line', readyHandler);
+
+      // Lets stop() or a newer start() settle this start if they kill the
+      // process before it reports ready.
+      this._startingChild = child;
+      this._abortStart = (error) => settle(error);
     });
   }
 
   stop() {
     this.onExit = null; // prevent restart callback on intentional stop
-    if (this.daemon) {
-      this.daemon.kill('SIGTERM');
-      this.daemon = null;
-    }
+    if (this.daemon) this._killChild(this.daemon);
+  }
+
+  // Forget the current process: reject its in-flight requests and close
+  // its reader. Its exit event is then ignored as stale.
+  _detachChild() {
+    this.daemon = null;
+    this.connected = false;
+    this.observing = false;
     if (this.rl) {
       this.rl.close();
       this.rl = null;
     }
-    this.connected = false;
-    this.observing = false;
+    for (const [, { reject: rej, timeout }] of this.pendingRequests) {
+      clearTimeout(timeout);
+      rej(new Error('Daemon exited'));
+    }
+    this.pendingRequests.clear();
+  }
+
+  _killChild(child) {
+    if (this._startingChild === child) this._abortStart(new Error('Daemon stopped before ready'));
+    this._detachChild();
+    child.kill('SIGTERM');
+    // Escalate if the process ignores SIGTERM (e.g. wedged in a blocking call).
+    const escalate = setTimeout(() => {
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+    }, 5000);
+    escalate.unref?.();
   }
 
   _notifyModelId(modelId) {
@@ -406,7 +490,11 @@ class DaemonHandler {
 
       this.pendingRequests.set(id, { resolve, reject, timeout });
 
-      const request = JSON.stringify({ id, cmd, args });
+      // The daemon handles commands one at a time; the deadline lets it drop
+      // a command that has waited past this timeout, after which the
+      // accessory has already rolled back its optimistic state.
+      const deadline = Date.now() + this.commandTimeout;
+      const request = JSON.stringify({ id, cmd, args, deadline });
       this.log.debug(`Sending: ${request}`);
       this.daemon.stdin.write(request + '\n');
     });
@@ -441,7 +529,7 @@ class PhilipsAirPurifierAccessory {
         this.log.warn('airplusDeviceUuid is required for airplus-cloud protocol. Run: python scripts/airplus_setup.py');
       }
       if (!this.airplusTokenFile) {
-        this.airplusTokenFile = path.join(os.homedir(), `.homebridge/philips-airplus-${this.airplusDeviceUuid}.json`);
+        this.airplusTokenFile = defaultAirplusTokenFile(api, this.airplusDeviceUuid);
         this.log.debug(`airplusTokenFile not set, defaulting to: ${this.airplusTokenFile}`);
       }
     } else {
@@ -454,7 +542,7 @@ class PhilipsAirPurifierAccessory {
 
     const pluginDir = __dirname;
     this.apiScriptPath = config.apiScriptPath || path.join(pluginDir, 'philips_air_api.py');
-    this.pythonPath = config.pythonPath || this.findPython(pluginDir);
+    this.pythonPath = config.pythonPath || findPythonCached(this, pluginDir);
 
     if (!this.apiScriptPath.endsWith('.py')) {
       throw new Error(`apiScriptPath must be a .py file: ${this.apiScriptPath}`);
@@ -592,6 +680,7 @@ class PhilipsAirPurifierAccessory {
   }
 
   async startDaemon() {
+    if (this._destroyed) return;
     if (this.protocol === 'airplus-cloud' && !this.airplusDeviceUuid) {
       this.log.warn('airplus-cloud requires airplusDeviceUuid. Use Plugin Settings to run the Air+ Setup Wizard, or set airplusDeviceUuid manually.');
       this.deviceReachable = false;
@@ -608,6 +697,10 @@ class PhilipsAirPurifierAccessory {
         airplusDeviceUuid: this.airplusDeviceUuid,
         airplusTokenFile: this.airplusTokenFile,
       });
+      if (this._destroyed) {
+        this.daemon.stop();
+        return;
+      }
       this.deviceReachable = connected;
       this._restartAttempt = 0;
       const updateType = this.protocol === 'coap' ? 'CoAP observe' : this.protocol === 'airplus-cloud' ? 'MQTT' : 'HTTP poll';
@@ -625,10 +718,14 @@ class PhilipsAirPurifierAccessory {
   }
 
   scheduleDaemonRestart() {
+    if (this._destroyed || this._restartTimer) return;
     const delay = RESTART_DELAYS[Math.min(this._restartAttempt, RESTART_DELAYS.length - 1)];
     this._restartAttempt++;
     this.log.info(`Restarting daemon in ${delay / 1000}s (attempt ${this._restartAttempt})...`);
-    setTimeout(() => this.startDaemon(), delay);
+    this._restartTimer = setTimeout(() => {
+      this._restartTimer = null;
+      this.startDaemon();
+    }, delay);
   }
 
   handleObserveUpdate(sensors) {
@@ -685,7 +782,7 @@ class PhilipsAirPurifierAccessory {
     this.informationService
       .setCharacteristic(Characteristic.Manufacturer, 'Philips')
       .setCharacteristic(Characteristic.Model, 'Air Purifier')
-      .setCharacteristic(Characteristic.SerialNumber, this.host);
+      .setCharacteristic(Characteristic.SerialNumber, (this.protocol === 'airplus-cloud' && this.airplusDeviceUuid) || this.host);
 
     // Main Air Purifier Service
     this.purifierService =
@@ -693,7 +790,7 @@ class PhilipsAirPurifierAccessory {
       this.platformAcc.addService(Service.AirPurifier, this.name);
 
     this.purifierService.getCharacteristic(Characteristic.Active)
-      .onGet(() => this.state.power ? 1 : 0)
+      .onGet(() => this.readWhenReachable(() => this.state.power ? 1 : 0))
       .onSet(async (value) => {
         const on = value === 1;
         this.log.info(`[SET] Power: ${on ? 'ON' : 'OFF'}`);
@@ -702,18 +799,18 @@ class PhilipsAirPurifierAccessory {
       });
 
     this.purifierService.getCharacteristic(Characteristic.CurrentAirPurifierState)
-      .onGet(() => this.state.power
+      .onGet(() => this.readWhenReachable(() => this.state.power
         ? Characteristic.CurrentAirPurifierState.PURIFYING_AIR
-        : Characteristic.CurrentAirPurifierState.INACTIVE);
+        : Characteristic.CurrentAirPurifierState.INACTIVE));
 
     // Air Quality Sensor
     this.airQualitySensor =
       this.platformAcc.getService(Service.AirQualitySensor) ||
       this.platformAcc.addService(Service.AirQualitySensor, 'Air Quality');
     this.airQualitySensor.getCharacteristic(Characteristic.AirQuality)
-      .onGet(() => this.pm25ToAirQuality(this.state.pm25));
+      .onGet(() => this.readWhenReachable(() => this.pm25ToAirQuality(this.state.pm25)));
     this.airQualitySensor.getCharacteristic(Characteristic.PM2_5Density)
-      .onGet(() => this.state.pm25 || 0);
+      .onGet(() => this.readWhenReachable(() => this.state.pm25 || 0));
 
     // HEPA Filter Maintenance
     this.hepaFilterService =
@@ -1073,6 +1170,18 @@ class PhilipsAirPurifierAccessory {
     return MODE_NAME[mode] || 'auto';
   }
 
+  /**
+   * Serve a cached value only while the device is reachable; otherwise
+   * make HomeKit show "No Response" rather than stale state. Applied to
+   * the tile-level characteristics the Home app uses for status.
+   */
+  readWhenReachable(read) {
+    if (!this.deviceReachable) {
+      throw new this.api.hap.HapStatusError(this.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+    }
+    return read();
+  }
+
   get commandLock() {
     return this._commandCount > 0;
   }
@@ -1213,6 +1322,13 @@ class PhilipsAirPurifierAccessory {
       setTimeout(() => { this._commandCount = Math.max(0, this._commandCount - 1); }, 500);
       return;
     }
+    // Remember what the optimistic write replaces so a failed command can
+    // be undone; otherwise HomeKit keeps showing a state the device never
+    // reached (CoAP only pushes on change, so it may never be corrected).
+    const priorState = {};
+    for (const key of Object.keys(optimisticState)) priorState[key] = this.state[key];
+    const priorPowerOnSentAt = this._powerOnSentAt;
+    const priorModeAfterPowerOn = this._modeAfterPowerOn;
     Object.assign(this.state, optimisticState);
     // Track a power-on we initiated so reapplyModeAfterPowerOn can
     // verify that a mode requested in the same batch actually stuck.
@@ -1228,6 +1344,12 @@ class PhilipsAirPurifierAccessory {
       if (cmd === 'power') this.updateLightCharacteristics();
     } catch (error) {
       this.log.error(`Command ${cmd} failed: ${error.message}`);
+      Object.assign(this.state, priorState);
+      this._powerOnSentAt = priorPowerOnSentAt;
+      this._modeAfterPowerOn = priorModeAfterPowerOn;
+      this.updatePurifierCharacteristics();
+      this.updateLightCharacteristics();
+      this.updateSleepCharacteristics();
       throw new this.api.hap.HapStatusError(this.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
     } finally {
       setTimeout(() => { this._commandCount = Math.max(0, this._commandCount - 1); }, 500);
@@ -1311,6 +1433,11 @@ class PhilipsAirPurifierAccessory {
   }
 
   destroy() {
+    this._destroyed = true;
+    if (this._restartTimer) {
+      clearTimeout(this._restartTimer);
+      this._restartTimer = null;
+    }
     if (this._fanSpeedTimer) {
       clearTimeout(this._fanSpeedTimer);
       this._fanSpeedTimer = null;
@@ -1380,3 +1507,4 @@ class LegacyPlatformAccessory {
 
 module.exports._DaemonHandler = DaemonHandler;
 module.exports._PhilipsAirPurifierAccessory = PhilipsAirPurifierAccessory;
+module.exports._defaultAirplusTokenFile = defaultAirplusTokenFile;

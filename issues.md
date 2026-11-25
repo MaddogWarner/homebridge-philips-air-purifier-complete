@@ -21,3 +21,16 @@
 To fix: capture a raw `fltsts` response from a HomeID device (`probe-homeid` or direct `curl`), identify the field names, and add them to `parse_status()` alongside the existing CoAP keys.
 
 **Location:** [philips_air_api.py](philips_air_api.py) — `parse_status()` filter section (around line 174)
+
+---
+
+## Air+ OTP email not delivered to Apple Private Relay addresses
+
+**Affects:** `airplus-cloud` protocol only  
+**Status:** Upstream limitation — not fixable in the plugin
+
+The email + OTP login emails a 6-digit code via Philips/Versuni (SAP CDC / Gigya) infrastructure. Apple "Sign in with Apple" relay addresses (`*@privaterelay.appleid.com`) only forward mail from sender domains the developer has registered with Apple; Philips' OTP sender is not registered, so the code email is bounced and never reaches the user. The plugin passes the email through unchanged and cannot influence delivery.
+
+Workaround: use the real account email, a standalone iCloud+ "Hide My Email" alias, or the browser-redirect fallback flow.
+
+**Location:** [homebridge-ui/server.js](homebridge-ui/server.js) — `handleOtpSend()` (email passed straight to `accounts.auth.otp.email.sendCode`).

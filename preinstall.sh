@@ -97,6 +97,6 @@ if [ -z "$PYTHON_BIN" ]; then
     exit 0
 fi
 
-echo "  Found $($PYTHON_BIN --version 2>&1)"
+echo "  Found $("$PYTHON_BIN" --version 2>&1)"
 echo "  Runtime requirement check complete."
 echo ""

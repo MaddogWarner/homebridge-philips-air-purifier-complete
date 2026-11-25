@@ -21,8 +21,10 @@ import ssl
 import sys
 import signal
 import tempfile
+import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 from typing import Dict, Any, Optional
@@ -97,7 +99,14 @@ MODE_NAMES = {
     MODE_TURBO: "turbo",
 }
 
-MODE_VALUES = {v: k for k, v in MODE_NAMES.items()}
+# CoAP command values. Explicit rather than inverted from MODE_NAMES, which
+# maps both 0 and 1 to "auto" (1 is Air+ AC0650 only); CoAP auto must be 0.
+MODE_VALUES = {
+    "auto": MODE_AUTO,
+    "sleep": MODE_SLEEP,
+    "medium": MODE_MEDIUM,
+    "turbo": MODE_TURBO,
+}
 
 AC1715_MODE_NAMES = {
     0: "auto",
@@ -176,6 +185,88 @@ _P = int(
     "FFFFFFFFFFFFFFFF",
     16,
 )
+
+
+_emit_lock = threading.Lock()
+
+
+def _emit(obj: Dict[str, Any]) -> None:
+    """Write one IPC message as a single JSON line.
+
+    Called from the event loop, worker threads and the Paho network thread.
+    print() issues separate writes for the text and the newline, so
+    concurrent callers could merge lines and break the JS line-per-message
+    parser; one locked write per message keeps every line intact.
+    """
+    line = json.dumps(obj) + "\n"
+    with _emit_lock:
+        sys.stdout.write(line)
+        sys.stdout.flush()
+
+
+# Overall bound on one daemon command, kept under the plugin's 15s command
+# timeout so the reply arrives before the JS side gives up and rolls back.
+COMMAND_TIMEOUT = 12
+EXPIRED_COMMAND_ERROR = "Command expired before it could be sent"
+
+
+def _command_budget(request: Dict[str, Any]) -> Optional[float]:
+    """Seconds a daemon command may run, or None if it has already expired.
+
+    The plugin sends ``deadline`` (epoch milliseconds) with each command and
+    abandons it after that. Commands are handled one at a time, so a queued
+    command can reach the front after its deadline; sending it then would
+    flap the device after HomeKit has already rolled back.
+    """
+    budget = float(COMMAND_TIMEOUT)
+    deadline = request.get("deadline")
+    if isinstance(deadline, (int, float)) and not isinstance(deadline, bool):
+        remaining = deadline / 1000 - time.time()
+        if remaining <= 0:
+            return None
+        budget = min(budget, remaining)
+    return budget
+
+
+async def _run_within(coro, budget: float) -> Any:
+    """Await ``coro``, failing with a readable TimeoutError after ``budget`` seconds."""
+    try:
+        async with asyncio.timeout(budget) as limit:
+            return await coro
+    except TimeoutError:
+        if limit.expired():
+            raise TimeoutError(f"Command did not complete within {budget:.1f}s") from None
+        raise
+
+
+_ALLOWED_URL_SCHEMES = ("http", "https")
+
+
+def _urlopen(request: urllib.request.Request, **kwargs):
+    """``urllib.request.urlopen`` restricted to http and https.
+
+    Every URL the plugin opens is built from a fixed http:// or https:// prefix,
+    but urllib would also honour file:// and other schemes, so enforce it here.
+    """
+    scheme = urllib.parse.urlsplit(request.full_url).scheme.lower()
+    if scheme not in _ALLOWED_URL_SCHEMES:
+        raise ValueError(f"Refusing to open a {scheme or 'scheme-less'} URL")
+    # Scheme checked above.
+    return urllib.request.urlopen(request, **kwargs)  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected  # noqa: E501
+
+
+def _socket_timeout(deadline: Optional[float], default: float = 10) -> float:
+    """Timeout for one blocking device request, capped by a monotonic deadline.
+
+    Worker threads cannot be cancelled, so commands run in threads check
+    their own deadline: a request is never started once it has passed.
+    """
+    if deadline is None:
+        return default
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError("Command deadline passed before the device request was sent")
+    return min(default, remaining)
 
 
 def _require_crypto():
@@ -357,7 +448,14 @@ class PhilipsAirHTTPClient:
         except Exception as e:
             raise ValueError(f"Failed to decrypt HTTP response from {self.host}: {e}") from e
 
-    def _http(self, method: str, path: str, body: Optional[bytes] = None) -> bytes:
+    def _http(
+        self,
+        method: str,
+        path: str,
+        body: Optional[bytes] = None,
+        deadline: Optional[float] = None,
+    ) -> bytes:
+        timeout = _socket_timeout(deadline)
         request = urllib.request.Request(
             self._url(path),
             data=body,
@@ -365,19 +463,19 @@ class PhilipsAirHTTPClient:
             headers={"Content-Type": "application/json"},
         )
         try:
-            with urllib.request.urlopen(request, timeout=10) as response:
+            with _urlopen(request, timeout=timeout) as response:
                 return response.read()
         except urllib.error.HTTPError as e:
             raise ConnectionError(f"HTTP {method} {path} failed with status {e.code}") from e
         except urllib.error.URLError as e:
             raise ConnectionError(f"HTTP {method} {path} failed: {e.reason}") from e
 
-    def connect(self):
+    def connect(self, deadline: Optional[float] = None):
         """Perform the DH key exchange and store the local HTTP session key."""
         private_key = secrets.randbits(256)
         public_key = pow(_G, private_key, _P)
         body = json.dumps({"diffie": format(public_key, "x")}).encode()
-        raw = self._http("PUT", "/di/v1/products/0/security", body)
+        raw = self._http("PUT", "/di/v1/products/0/security", body, deadline)
         response = json.loads(raw)
         server_public_key = int(response["hellman"], 16)
         shared_secret = pow(server_public_key, private_key, _P)
@@ -392,8 +490,8 @@ class PhilipsAirHTTPClient:
         raw = self._http("GET", "/di/v1/products/1/air")
         return self._decrypt(raw)
 
-    def set_values(self, values: Dict[str, Any]):
-        self._http("PUT", "/di/v1/products/1/air", self._encrypt(values))
+    def set_values(self, values: Dict[str, Any], deadline: Optional[float] = None):
+        self._http("PUT", "/di/v1/products/1/air", self._encrypt(values), deadline)
 
 
 class PhilipsCondorAuth:
@@ -527,7 +625,9 @@ class PhilipsHomeIDHTTPClient:
         values: Optional[Dict[str, Any]] = None,
         product_id: Optional[int] = None,
         retry_auth: bool = True,
+        deadline: Optional[float] = None,
     ) -> Optional[Dict[str, Any]]:
+        timeout = _socket_timeout(deadline)
         request = urllib.request.Request(
             self._url(port_name, product_id),
             data=self._prepare_body(values),
@@ -535,7 +635,9 @@ class PhilipsHomeIDHTTPClient:
             headers=self._headers(),
         )
         try:
-            with urllib.request.urlopen(request, timeout=10, context=self._ssl_context) as response:
+            with _urlopen(
+                request, timeout=timeout, context=self._ssl_context
+            ) as response:
                 return self._decode_body(response.read(), port_name)
         except urllib.error.HTTPError as e:
             if e.code == 401 and retry_auth:
@@ -549,7 +651,9 @@ class PhilipsHomeIDHTTPClient:
                     self.client_id,
                     self.client_secret,
                 )
-                return self._request(method, port_name, values, product_id, retry_auth=False)
+                return self._request(
+                    method, port_name, values, product_id, retry_auth=False, deadline=deadline
+                )
             if e.code == 429:
                 raise ConnectionError(f"HomeID {method} /{port_name} failed: device busy (429)") from e
             if e.code in (404, 501):
@@ -558,18 +662,18 @@ class PhilipsHomeIDHTTPClient:
         except urllib.error.URLError as e:
             raise ConnectionError(f"HomeID {method} /{port_name} failed: {e.reason}") from e
 
-    def connect(self):
+    def connect(self, deadline: Optional[float] = None):
         """Validate reachability and fetch an encryption key when credentials allow it."""
-        info = self.get_device_info()
+        info = self.get_device_info(deadline)
         if info is None:
-            status = self._request("GET", HOMEID_PORT_STATUS)
+            status = self._request("GET", HOMEID_PORT_STATUS, deadline=deadline)
             if status is None:
                 raise ConnectionError("HomeID device did not respond on device or status endpoints")
         if not self.encryption_key and self.client_id and self.client_secret:
-            self.exchange_encryption_key()
+            self.exchange_encryption_key(deadline)
 
-    def exchange_encryption_key(self) -> Optional[str]:
-        result = self._request("GET", HOMEID_PORT_SECURITY, product_id=0)
+    def exchange_encryption_key(self, deadline: Optional[float] = None) -> Optional[str]:
+        result = self._request("GET", HOMEID_PORT_SECURITY, product_id=0, deadline=deadline)
         if not result:
             return None
         key = result.get("raw") or result.get("key")
@@ -578,10 +682,10 @@ class PhilipsHomeIDHTTPClient:
             return self.encryption_key
         return None
 
-    def get_device_info(self) -> Optional[Dict[str, Any]]:
+    def get_device_info(self, deadline: Optional[float] = None) -> Optional[Dict[str, Any]]:
         return (
-            self._request("GET", HOMEID_PORT_DEVICE, product_id=1)
-            or self._request("GET", HOMEID_PORT_DEVICE, product_id=0)
+            self._request("GET", HOMEID_PORT_DEVICE, product_id=1, deadline=deadline)
+            or self._request("GET", HOMEID_PORT_DEVICE, product_id=0, deadline=deadline)
         )
 
     def get_status(self) -> Dict[str, Any]:
@@ -599,8 +703,8 @@ class PhilipsHomeIDHTTPClient:
             raise ConnectionError("HomeID status polling returned no status, air, or filter data")
         return merged
 
-    def set_values(self, values: Dict[str, Any]):
-        result = self._request("PUT", HOMEID_PORT_STATUS, values)
+    def set_values(self, values: Dict[str, Any], deadline: Optional[float] = None):
+        result = self._request("PUT", HOMEID_PORT_STATUS, values, deadline=deadline)
         if result is None:
             raise ConnectionError("HomeID control request returned no response")
 
@@ -615,7 +719,7 @@ class PhilipsHomeIDHTTPClient:
                 url = self._url(port_name, product_id)
                 request = urllib.request.Request(url, method="GET", headers={"Content-Type": "application/json"})
                 try:
-                    with urllib.request.urlopen(request, timeout=5, context=self._ssl_context) as response:
+                    with _urlopen(request, timeout=5, context=self._ssl_context) as response:
                         result["reachable"] = True
                         result["endpoints"][f"{product_id}/{port_name}"] = response.status
                 except urllib.error.HTTPError as e:
@@ -646,14 +750,25 @@ class AirPlusCloudClient:
         self._state_queue: _queue_module.Queue = _queue_module.Queue()
         self._ready = threading.Event()
         self._token_write_lock = threading.Lock()
+        # Guards self._tokens: the Paho network thread (reconnect handshakes)
+        # and asyncio worker threads (commands) both refresh and persist it.
+        # Re-entrant because _ensure_token -> _refresh_token -> _save_tokens.
+        self._token_lock = threading.RLock()
         self._model_id: Optional[str] = None
+        # time.monotonic() of the last malformed-message log (rate limiting).
+        self._last_message_error_log: Optional[float] = None
 
     def _load_tokens(self):
         with open(self._token_file) as f:
-            self._tokens = json.load(f)
+            tokens = json.load(f)
+        with self._token_lock:
+            self._tokens = tokens
 
     def _save_tokens(self):
-        with self._token_write_lock:
+        # Hold the token lock for the whole write so an older snapshot can
+        # never replace a newer (rotated) refresh token on disk.
+        with self._token_lock, self._token_write_lock:
+            snapshot = dict(self._tokens)
             token_dir = os.path.dirname(self._token_file) or "."
             token_name = os.path.basename(self._token_file)
             tmp = None
@@ -666,7 +781,7 @@ class AirPlusCloudClient:
                     delete=False,
                 ) as f:
                     tmp = f.name
-                    json.dump(self._tokens, f, indent=2)
+                    json.dump(snapshot, f, indent=2)
                 os.chmod(tmp, 0o600)
                 os.replace(tmp, self._token_file)
                 tmp = None
@@ -686,12 +801,12 @@ class AirPlusCloudClient:
         try:
             response = self._api_get("/da/user/self/device")
         except Exception as error:
-            print(json.dumps({
+            _emit({
                 "type": "warning",
                 "event": "airplus_model_lookup_failed",
                 "message": "Air+ model lookup failed "
                            f"({type(error).__name__}); model remains unknown",
-            }), flush=True)
+            })
             return None
 
         if isinstance(response, list):
@@ -735,8 +850,9 @@ class AirPlusCloudClient:
             )
 
             if model_id:
-                self._tokens["model_id"] = str(model_id)
-                self._save_tokens()
+                with self._token_lock:
+                    self._tokens["model_id"] = str(model_id)
+                    self._save_tokens()
                 return str(model_id)
 
         return None
@@ -758,53 +874,65 @@ class AirPlusCloudClient:
         return self._model_id
 
     def _api_get(self, path: str) -> Dict[str, Any]:
+        self._ensure_token()
+        with self._token_lock:
+            access_token = self._tokens["access_token"]
         req = urllib.request.Request(
             f"{_AIRPLUS_API_BASE}{path}",
             headers={
-                "Authorization": f"Bearer {self._tokens['access_token']}",
+                "Authorization": f"Bearer {access_token}",
                 "User-Agent": _AIRPLUS_USER_AGENT,
                 "Accept": "application/json",
             },
         )
-        with urllib.request.urlopen(req, timeout=10) as r:
+        with _urlopen(req, timeout=10) as r:
             return json.loads(r.read())
 
     def _refresh_token(self):
         import urllib.parse
-        data = urllib.parse.urlencode({
-            "grant_type": "refresh_token",
-            "refresh_token": self._tokens["refresh_token"],
-            "client_id": self._tokens.get("client_id", _AIRPLUS_CLIENT_ID),
-        }).encode()
-        req = urllib.request.Request(
-            _AIRPLUS_OIDC_TOKEN_URL,
-            data=data,
-            headers={
-                "Content-Type": "application/x-www-form-urlencoded",
-                "User-Agent": _AIRPLUS_USER_AGENT,
-                "Accept": "application/json",
-            },
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=10) as r:
-            resp = json.loads(r.read())
-        self._tokens["access_token"] = resp["access_token"]
-        if "refresh_token" in resp:
-            self._tokens["refresh_token"] = resp["refresh_token"]
-        if resp.get("id_token"):
-            self._tokens["id_token"] = resp["id_token"]
-        self._tokens["expires_at"] = time.time() + resp.get("expires_in", 3600)
-        self._save_tokens()
+        # Held across the request so concurrent callers don't both spend the
+        # same (rotating) refresh token.
+        with self._token_lock:
+            data = urllib.parse.urlencode({
+                "grant_type": "refresh_token",
+                "refresh_token": self._tokens["refresh_token"],
+                "client_id": self._tokens.get("client_id", _AIRPLUS_CLIENT_ID),
+            }).encode()
+            req = urllib.request.Request(
+                _AIRPLUS_OIDC_TOKEN_URL,
+                data=data,
+                headers={
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "User-Agent": _AIRPLUS_USER_AGENT,
+                    "Accept": "application/json",
+                },
+                method="POST",
+            )
+            with _urlopen(req, timeout=10) as r:
+                resp = json.loads(r.read())
+            self._tokens["access_token"] = resp["access_token"]
+            if "refresh_token" in resp:
+                self._tokens["refresh_token"] = resp["refresh_token"]
+            if resp.get("id_token"):
+                self._tokens["id_token"] = resp["id_token"]
+            self._tokens["expires_at"] = time.time() + resp.get("expires_in", 3600)
+            self._save_tokens()
 
     def _ensure_token(self):
-        expires_at = self._tokens.get("expires_at", 0)
-        if time.time() + 300 > expires_at:  # refresh 5 minutes early
-            self._refresh_token()
+        with self._token_lock:
+            expires_at = self._tokens.get("expires_at", 0)
+            if time.time() + 300 > expires_at:  # refresh 5 minutes early
+                self._refresh_token()
 
     def _fetch_signature(self) -> str:
         try:
             return self._api_get("/da/user/self/signature")["signature"]
-        except Exception:
+        except urllib.error.HTTPError as e:
+            # Only an auth rejection warrants a refresh; network/DNS/5xx
+            # errors would otherwise hit the OIDC endpoint on every reconnect.
+            if e.code != 401:
+                raise
+            e.close()
             self._refresh_token()
             return self._api_get("/da/user/self/signature")["signature"]
 
@@ -833,7 +961,7 @@ class AirPlusCloudClient:
             )
 
             try:
-                with urllib.request.urlopen(req, timeout=10) as r:
+                with _urlopen(req, timeout=10) as r:
                     result = json.loads(r.read())
                 break
             except urllib.error.HTTPError as e:
@@ -855,8 +983,9 @@ class AirPlusCloudClient:
         if not user_id:
             raise RuntimeError("MQTT get-id returned no userId")
 
-        self._tokens["mqtt_user_id"] = user_id
-        self._save_tokens()
+        with self._token_lock:
+            self._tokens["mqtt_user_id"] = user_id
+            self._save_tokens()
         return user_id
 
     def connect(self):
@@ -890,12 +1019,12 @@ class AirPlusCloudClient:
                 error_detail = type(e).__name__
                 if isinstance(e, urllib.error.HTTPError):
                     error_detail += f" (HTTP {e.code})"
-                print(json.dumps({
+                _emit({
                     "type": "log",
                     "event": "mqtt_auth_error",
                     "message": f"Failed to refresh MQTT credentials: {error_detail}; "
                                "upstream response omitted",
-                }), flush=True)
+                })
                 # Paho's reconnect loop only survives OSError; anything
                 # else would kill the network thread and end reconnects.
                 raise ConnectionError(
@@ -946,11 +1075,11 @@ class AirPlusCloudClient:
     def _on_connect(self, client, userdata, flags, rc, properties=None):
         self._connect_rc = rc
 
-        print(json.dumps({
+        _emit({
             "type": "log",
             "event": "mqtt_connack",
             "message": f"MQTT CONNACK rc={rc}",
-        }), flush=True)
+        })
 
         if rc == 0:
             self._connected = True
@@ -977,22 +1106,43 @@ class AirPlusCloudClient:
                 port = payload.get("portName", "")
                 if port == "Status" and props:
                     self._state_queue.put(dict(props))
-        except Exception:
-            pass
+        except Exception as e:
+            self._log_message_error(e)
+
+    # At most one malformed-message log per this many seconds.
+    _MESSAGE_ERROR_LOG_SECONDS = 60
+
+    def _log_message_error(self, error: Exception) -> None:
+        """Log an unparseable MQTT message without flooding or leaking it.
+
+        Only the exception type is reported: the payload and exception text
+        can carry device or account data.
+        """
+        now = time.monotonic()
+        last = self._last_message_error_log
+        if last is not None and now - last < self._MESSAGE_ERROR_LOG_SECONDS:
+            return
+        self._last_message_error_log = now
+        _emit({
+            "type": "log",
+            "event": "mqtt_message_error",
+            "message": f"Ignored an Air+ MQTT message that could not be processed "
+                       f"({type(error).__name__})",
+        })
 
     def _on_disconnect(self, client, userdata, rc, properties=None):
         self._connected = False
-        print(json.dumps({
+        _emit({
             "type": "log",
             "event": "mqtt_disconnect",
             "message": f"MQTT disconnected (rc={rc}); Paho will reconnect "
                        "with refreshed credentials",
-        }), flush=True)
+        })
 
     def get_status_queue(self):
         return self._state_queue
 
-    def set_values(self, values: Dict[str, Any]):
+    def set_values(self, values: Dict[str, Any], deadline: Optional[float] = None):
         if not self._mqtt or not self._connected:
             # Raising (rather than returning) lets the daemon report
             # success:false, so HomeKit shows the failure instead of a
@@ -1002,6 +1152,8 @@ class AirPlusCloudClient:
         # mode dcodes, the light property key, and the control envelope all
         # depend on the model — recover it if connect()'s fetch failed.
         self.ensure_model_id()
+        # The model lookup can be slow; publish nothing once the deadline passes.
+        _socket_timeout(deadline)
 
         control_topic = f"da_ctrl/{self._device_id}/to_ncp"
         shadow_topic = (
@@ -1066,6 +1218,10 @@ class AirPlusCloudClient:
             self._mqtt = None
 
 
+class _ObserveStale(Exception):
+    """The CoAP observation has been silent for longer than the idle limit."""
+
+
 class ObserveDaemon:
     """Daemon using CoAP Observe for push updates from device."""
 
@@ -1079,162 +1235,247 @@ class ObserveDaemon:
         self._last_update: float = 0
         self._shutdown_event = asyncio.Event()
         self._observe_task: Optional[asyncio.Task] = None
+        self._supervisor_task: Optional[asyncio.Task] = None
+        # Serialises client creation between the observe loop and commands.
+        self._connect_lock = asyncio.Lock()
+
+    # Back-off after a failed observation before reconnecting.
+    _OBSERVE_RETRY_SECONDS = 5
+    # A device that reboots or forgets its observers just goes quiet, with
+    # no error; resubscribe if no notification arrives for this long.
+    _OBSERVE_IDLE_SECONDS = 600
+    # How often to restart a dead observe task when no commands arrive.
+    _SUPERVISE_SECONDS = 30
 
     async def connect(self) -> bool:
-        """Connect to the device."""
+        """Connect to the device.
+
+        Never touches the observe task: commands call this too, and
+        cancelling the observe task from the command path used to kill it
+        for good.
+        """
         _require_coap()
-        if self._client and self._connected:
-            return True
-        if self._client:
-            await self.disconnect()
+        async with self._connect_lock:
+            if self._client and self._connected:
+                return True
+            if self._client:
+                await self._shutdown_client(self._client)
+                self._client = None
+            try:
+                self._client = await Client.create(self.host, self.port)
+                self._connected = True
+                return True
+            except Exception as e:
+                self._client = None
+                self._connected = False
+                raise ConnectionError(f"Failed to connect: {e}")
+
+    @staticmethod
+    async def _shutdown_client(client) -> None:
         try:
-            self._client = await Client.create(self.host, self.port)
-            self._connected = True
-            return True
-        except Exception as e:
+            await client.shutdown()
+        except Exception:
+            pass
+
+    async def _drop_client(self, client) -> None:
+        """Close ``client`` if it is still current, leaving the observe task alone.
+
+        If a command has already replaced it with a fresh connection, that
+        connection is kept.
+        """
+        async with self._connect_lock:
+            if client is None or client is not self._client:
+                return
             self._client = None
             self._connected = False
-            raise ConnectionError(f"Failed to connect: {e}")
+        await self._shutdown_client(client)
+
+    def _ensure_observe_task(self) -> None:
+        """(Re)start the observe task if it is not running."""
+        if self._shutdown_event.is_set():
+            return
+        task = self._observe_task
+        if task is not None and not task.done():
+            return
+        if task is not None:
+            error = None if task.cancelled() else task.exception()
+            self._log("observe_restart", f"Observe task had stopped ({error!r}); restarting")
+        self._observe_task = asyncio.create_task(self._observe_loop())
+
+    async def _supervise_observe(self):
+        """Restart a dead observe task even when no commands are arriving."""
+        while not self._shutdown_event.is_set():
+            try:
+                await asyncio.wait_for(
+                    self._shutdown_event.wait(), timeout=self._SUPERVISE_SECONDS
+                )
+            except asyncio.TimeoutError:
+                self._ensure_observe_task()
 
     async def disconnect(self):
-        """Disconnect from the device."""
+        """Disconnect from the device and stop observing (shutdown only)."""
         self._connected = False
         self._observing = False
-        if self._observe_task:
-            self._observe_task.cancel()
-            try:
-                await self._observe_task
-            except asyncio.CancelledError:
-                pass
-            self._observe_task = None
-        if self._client:
-            try:
-                await self._client.shutdown()
-            except Exception:
-                pass
-            self._client = None
+        for name in ("_supervisor_task", "_observe_task"):
+            task = getattr(self, name)
+            setattr(self, name, None)
+            if task and task is not asyncio.current_task():
+                task.cancel()
+                try:
+                    await task
+                except (asyncio.CancelledError, Exception):
+                    pass
+        client, self._client = self._client, None
+        if client:
+            await self._shutdown_client(client)
 
     async def _observe_loop(self):
         """Background task that receives observe notifications."""
         while not self._shutdown_event.is_set():
+            client = None
             try:
                 if not self._connected:
                     await self.connect()
+                client = self._client
                 self._observing = True
                 self._log("observe", "Starting observation subscription")
-                async for status in self._client.observe_status():
-                    if self._shutdown_event.is_set():
-                        break
-                    self._cached_state = status
-                    self._last_update = time.time()
-                    sensors = parse_status(status)
-                    print(json.dumps({
-                        "type": "update",
-                        "data": sensors,
-                        "timestamp": self._last_update
-                    }), flush=True)
+                idle_seconds = self._OBSERVE_IDLE_SECONDS
+                loop = asyncio.get_running_loop()
+                try:
+                    # Re-armed on every notification, so it only fires when the
+                    # device has gone quiet for idle_seconds.
+                    async with asyncio.timeout(idle_seconds) as idle:
+                        async for status in client.observe_status():
+                            idle.reschedule(loop.time() + idle_seconds)
+                            if self._shutdown_event.is_set():
+                                break
+                            self._cached_state = status
+                            self._last_update = time.time()
+                            sensors = parse_status(status)
+                            _emit({
+                                "type": "update",
+                                "data": sensors,
+                                "timestamp": self._last_update
+                            })
+                except TimeoutError:
+                    if not idle.expired():
+                        raise
+                    raise _ObserveStale(
+                        f"No observe notification for {idle_seconds}s; resubscribing"
+                    ) from None
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 self._observing = False
-                self._connected = False
-                self._log("observe_error", f"Observation failed: {e}")
+                if isinstance(e, _ObserveStale):
+                    self._log("observe_stale", str(e))
+                else:
+                    self._log("observe_error", f"Observation failed: {e}")
+                # Close the failed client without cancelling this task.
+                await self._drop_client(client)
                 if not self._shutdown_event.is_set():
-                    await asyncio.sleep(5)
-                    try:
-                        await self.disconnect()
-                    except Exception:
-                        pass
+                    await asyncio.sleep(self._OBSERVE_RETRY_SECONDS)
         self._observing = False
 
     def _log(self, event: str, message: str):
         """Send log message to JS."""
-        print(json.dumps({
+        _emit({
             "type": "log",
             "event": event,
             "message": message
-        }), flush=True)
+        })
 
     async def start(self):
         """Start the daemon."""
         try:
             await self.connect()
-            print(json.dumps({
+            _emit({
                 "type": "ready",
                 "connected": True,
                 "host": self.host
-            }), flush=True)
+            })
         except Exception as e:
-            print(json.dumps({
+            _emit({
                 "type": "ready",
                 "connected": False,
                 "host": self.host,
                 "error": str(e)
-            }), flush=True)
-        self._observe_task = asyncio.create_task(self._observe_loop())
+            })
+        self._ensure_observe_task()
+        self._supervisor_task = asyncio.create_task(self._supervise_observe())
         await self._process_commands()
         await self.disconnect()
-        print(json.dumps({"type": "shutdown"}), flush=True)
+        _emit({"type": "shutdown"})
 
     async def _process_commands(self):
         """Process commands from stdin."""
-        loop = asyncio.get_running_loop()
-        reader = asyncio.StreamReader()
-        reader_protocol = asyncio.StreamReaderProtocol(reader)
-        await loop.connect_read_pipe(lambda: reader_protocol, sys.stdin)
+        try:
+            loop = asyncio.get_running_loop()
+            reader = asyncio.StreamReader()
+            reader_protocol = asyncio.StreamReaderProtocol(reader)
+            await loop.connect_read_pipe(lambda: reader_protocol, sys.stdin)
 
-        while not self._shutdown_event.is_set():
-            try:
-                line_task = asyncio.create_task(reader.readline())
-                shutdown_task = asyncio.create_task(self._shutdown_event.wait())
-                done, pending = await asyncio.wait(
-                    [line_task, shutdown_task],
-                    return_when=asyncio.FIRST_COMPLETED
-                )
-                for task in pending:
-                    task.cancel()
-                if self._shutdown_event.is_set():
-                    break
-                line = line_task.result()
-                if not line:
-                    break
-                line = line.decode('utf-8').strip()
-                if not line:
-                    continue
+            while not self._shutdown_event.is_set():
                 try:
-                    request = json.loads(line)
-                    await self._handle_request(request)
-                except json.JSONDecodeError as e:
-                    print(json.dumps({
-                        "success": False,
-                        "error": f"Invalid JSON: {e}"
-                    }), flush=True)
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                print(json.dumps({
-                    "type": "error",
-                    "error": str(e)
-                }), flush=True)
+                    line_task = asyncio.create_task(reader.readline())
+                    shutdown_task = asyncio.create_task(self._shutdown_event.wait())
+                    done, pending = await asyncio.wait(
+                        [line_task, shutdown_task],
+                        return_when=asyncio.FIRST_COMPLETED
+                    )
+                    for task in pending:
+                        task.cancel()
+                    if self._shutdown_event.is_set():
+                        break
+                    line = line_task.result()
+                    if not line:
+                        break
+                    line = line.decode('utf-8').strip()
+                    if not line:
+                        continue
+                    try:
+                        request = json.loads(line)
+                        await self._handle_request(request)
+                    except json.JSONDecodeError as e:
+                        _emit({
+                            "success": False,
+                            "error": f"Invalid JSON: {e}"
+                        })
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    _emit({
+                        "type": "error",
+                        "error": str(e)
+                    })
+        finally:
+            # stdin EOF means the parent has gone: stop the observe loop too.
+            self._shutdown_event.set()
 
     async def _handle_request(self, request: dict):
         """Handle a single request from stdin."""
         request_id = request.get("id")
         cmd = request.get("cmd", "")
         args = request.get("args", [])
+        # Any command (including the periodic ping) revives a dead observe task.
+        self._ensure_observe_task()
+        budget = _command_budget(request)
+        if budget is None:
+            _emit({"id": request_id, "success": False, "error": EXPIRED_COMMAND_ERROR})
+            return
         try:
-            result = await self._execute_command(cmd, args)
-            print(json.dumps({
+            result = await _run_within(self._execute_command(cmd, args), budget)
+            _emit({
                 "id": request_id,
                 "success": True,
                 "data": result
-            }), flush=True)
+            })
         except Exception as e:
-            print(json.dumps({
+            _emit({
                 "id": request_id,
                 "success": False,
                 "error": str(e)
-            }), flush=True)
+            })
 
     async def _execute_command(self, cmd: str, args: list) -> Any:
         """Execute a command."""
@@ -1330,6 +1571,8 @@ class HTTPPollingDaemon:
         self._last_update: float = 0
         self._shutdown_event = asyncio.Event()
         self._poll_task: Optional[asyncio.Task] = None
+        # time.monotonic() deadline of the command being handled.
+        self._command_deadline: Optional[float] = None
 
     async def connect(self) -> bool:
         await asyncio.to_thread(self._client.connect)
@@ -1338,34 +1581,34 @@ class HTTPPollingDaemon:
 
     def _log(self, event: str, message: str):
         """Send log message to JS."""
-        print(json.dumps({
+        _emit({
             "type": "log",
             "event": event,
             "message": message
-        }), flush=True)
+        })
 
     async def start(self):
         """Start the daemon."""
         try:
             await self.connect()
-            print(json.dumps({
+            _emit({
                 "type": "ready",
                 "connected": True,
                 "host": self.host
-            }), flush=True)
+            })
         except Exception as e:
             self._connected = False
-            print(json.dumps({
+            _emit({
                 "type": "ready",
                 "connected": False,
                 "host": self.host,
                 "error": str(e)
-            }), flush=True)
+            })
 
         self._poll_task = asyncio.create_task(self._poll_loop())
         await self._process_commands()
         await self.disconnect()
-        print(json.dumps({"type": "shutdown"}), flush=True)
+        _emit({"type": "shutdown"})
 
     async def disconnect(self):
         self._connected = False
@@ -1385,11 +1628,11 @@ class HTTPPollingDaemon:
                 state = await asyncio.to_thread(self._client.get_status)
                 self._cached_state = state
                 self._last_update = time.time()
-                print(json.dumps({
+                _emit({
                     "type": "update",
                     "data": parse_status(state),
                     "timestamp": self._last_update
-                }), flush=True)
+                })
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -1432,35 +1675,42 @@ class HTTPPollingDaemon:
                     request = json.loads(line)
                     await self._handle_request(request)
                 except json.JSONDecodeError as e:
-                    print(json.dumps({
+                    _emit({
                         "success": False,
                         "error": f"Invalid JSON: {e}"
-                    }), flush=True)
+                    })
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                print(json.dumps({
+                _emit({
                     "type": "error",
                     "error": str(e)
-                }), flush=True)
+                })
 
     async def _handle_request(self, request: dict):
         request_id = request.get("id")
         cmd = request.get("cmd", "")
         args = request.get("args", [])
+        budget = _command_budget(request)
+        if budget is None:
+            _emit({"id": request_id, "success": False, "error": EXPIRED_COMMAND_ERROR})
+            return
+        # Device requests run in worker threads, which the timeout below
+        # cannot cancel; _send_control hands them this deadline instead.
+        self._command_deadline = time.monotonic() + budget
         try:
-            result = await self._execute_command(cmd, args)
-            print(json.dumps({
+            result = await _run_within(self._execute_command(cmd, args), budget)
+            _emit({
                 "id": request_id,
                 "success": True,
                 "data": result
-            }), flush=True)
+            })
         except Exception as e:
-            print(json.dumps({
+            _emit({
                 "id": request_id,
                 "success": False,
                 "error": str(e)
-            }), flush=True)
+            })
 
     async def _execute_command(self, cmd: str, args: list) -> Any:
         if cmd == "sensors":
@@ -1531,9 +1781,11 @@ class HTTPPollingDaemon:
             raise ValueError(f"Unknown command: {cmd}")
 
     async def _send_control(self, values: Dict[str, Any]):
+        deadline = self._command_deadline
         if not self._connected:
-            await self.connect()
-        await asyncio.to_thread(self._client.set_values, values)
+            await asyncio.to_thread(self._client.connect, deadline)
+            self._connected = True
+        await asyncio.to_thread(self._client.set_values, values, deadline)
         if self._cached_state:
             self._cached_state.update(values)
 
@@ -1566,6 +1818,8 @@ class HomeIDHTTPPollingDaemon(HTTPPollingDaemon):
         self._last_update: float = 0
         self._shutdown_event = asyncio.Event()
         self._poll_task: Optional[asyncio.Task] = None
+        # time.monotonic() deadline of the command being handled.
+        self._command_deadline: Optional[float] = None
 
     async def _execute_command(self, cmd: str, args: list) -> Any:
         if cmd == "sensors":
@@ -1644,40 +1898,42 @@ class AirPlusCloudDaemon:
         self._token_file = token_file
         self._client: Optional[AirPlusCloudClient] = None
         self._shutdown_event = asyncio.Event()
+        # time.monotonic() deadline of the command being handled.
+        self._command_deadline: Optional[float] = None
 
     def shutdown(self):
         self._shutdown_event.set()
 
     def _log(self, event: str, message: str):
-        print(json.dumps({
+        _emit({
             "type": "log",
             "event": event,
             "message": message,
-        }), flush=True)
+        })
 
     async def start(self):
         try:
             self._client = AirPlusCloudClient(self._uuid, self._token_file)
             await asyncio.to_thread(self._client.connect)
-            print(json.dumps({
+            _emit({
                 "type": "ready",
                 "connected": True,
                 "host": "cloud",
                 "model_id": self._client.get_model_id(),
-            }), flush=True)
+            })
         except Exception as e:
-            print(json.dumps({
+            _emit({
                 "type": "ready",
                 "connected": False,
                 "host": "cloud",
                 "error": str(e),
-            }), flush=True)
+            })
             return
 
         await asyncio.gather(self._state_loop(), self._process_commands())
         if self._client:
             await asyncio.to_thread(self._client.disconnect)
-        print(json.dumps({"type": "shutdown"}), flush=True)
+        _emit({"type": "shutdown"})
 
     # If MQTT stays down this long, reconnecting with refreshed
     # credentials has failed (e.g. revoked refresh token) — exit so the
@@ -1707,12 +1963,12 @@ class AirPlusCloudDaemon:
                     raw,
                     model_id=self._client.get_model_id(),
                 )
-                print(json.dumps({
+                _emit({
                     "type": "update",
                     "data": state,
                     "model_id": self._client.get_model_id(),
                     "timestamp": time.time(),
-                }), flush=True)
+                })
             except _queue_module.Empty:
                 pass
             except asyncio.CancelledError:
@@ -1723,62 +1979,77 @@ class AirPlusCloudDaemon:
 
     async def _process_commands(self):
         """Process commands from stdin — same pattern as HTTPPollingDaemon."""
-        loop = asyncio.get_running_loop()
-        reader = asyncio.StreamReader()
-        reader_protocol = asyncio.StreamReaderProtocol(reader)
-        await loop.connect_read_pipe(lambda: reader_protocol, sys.stdin)
+        try:
+            loop = asyncio.get_running_loop()
+            reader = asyncio.StreamReader()
+            reader_protocol = asyncio.StreamReaderProtocol(reader)
+            await loop.connect_read_pipe(lambda: reader_protocol, sys.stdin)
 
-        while not self._shutdown_event.is_set():
-            try:
-                line_task = asyncio.create_task(reader.readline())
-                shutdown_task = asyncio.create_task(self._shutdown_event.wait())
-                done, pending = await asyncio.wait(
-                    [line_task, shutdown_task],
-                    return_when=asyncio.FIRST_COMPLETED,
-                )
-                for task in pending:
-                    task.cancel()
-                if self._shutdown_event.is_set():
-                    break
-                line = line_task.result()
-                if not line:
-                    break
-                line = line.decode("utf-8").strip()
-                if not line:
-                    continue
+            while not self._shutdown_event.is_set():
                 try:
-                    request = json.loads(line)
-                    await self._handle_request(request)
-                except json.JSONDecodeError as e:
-                    print(json.dumps({
-                        "success": False,
-                        "error": f"Invalid JSON: {e}",
-                    }), flush=True)
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                print(json.dumps({
-                    "type": "error",
-                    "error": str(e),
-                }), flush=True)
+                    line_task = asyncio.create_task(reader.readline())
+                    shutdown_task = asyncio.create_task(self._shutdown_event.wait())
+                    done, pending = await asyncio.wait(
+                        [line_task, shutdown_task],
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                    for task in pending:
+                        task.cancel()
+                    if self._shutdown_event.is_set():
+                        break
+                    line = line_task.result()
+                    if not line:
+                        break
+                    line = line.decode("utf-8").strip()
+                    if not line:
+                        continue
+                    try:
+                        request = json.loads(line)
+                        await self._handle_request(request)
+                    except json.JSONDecodeError as e:
+                        _emit({
+                            "success": False,
+                            "error": f"Invalid JSON: {e}",
+                        })
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    _emit({
+                        "type": "error",
+                        "error": str(e),
+                    })
+        finally:
+            # stdin EOF means the parent has gone: stop _state_loop too, or the
+            # process lingers with a live MQTT session.
+            self._shutdown_event.set()
 
     async def _handle_request(self, request: dict):
         request_id = request.get("id")
         cmd = request.get("cmd", "")
         args = request.get("args", [])
+        budget = _command_budget(request)
+        if budget is None:
+            _emit({"id": request_id, "success": False, "error": EXPIRED_COMMAND_ERROR})
+            return
+        # set_values runs in a worker thread the timeout cannot cancel, so it
+        # also gets the deadline and publishes nothing once it has passed.
+        self._command_deadline = time.monotonic() + budget
         try:
-            result = await self._execute_command(cmd, args)
-            print(json.dumps({
+            result = await _run_within(self._execute_command(cmd, args), budget)
+            _emit({
                 "id": request_id,
                 "success": True,
                 "data": result,
-            }), flush=True)
+            })
         except Exception as e:
-            print(json.dumps({
+            _emit({
                 "id": request_id,
                 "success": False,
                 "error": str(e),
-            }), flush=True)
+            })
+
+    async def _set_values(self, values: Dict[str, Any]):
+        await asyncio.to_thread(self._client.set_values, values, self._command_deadline)
 
     async def _execute_command(self, cmd: str, args: list) -> Any:
         if cmd == "ping":
@@ -1792,7 +2063,7 @@ class AirPlusCloudDaemon:
             if args:
                 on = str(args[0]).lower() in ["on", "1", "true"]
                 if self._client:
-                    await asyncio.to_thread(self._client.set_values, {"power": on})
+                    await self._set_values({"power": on})
                 return {"power": on}
             raise Exception("No args provided for power command")
         elif cmd == "mode":
@@ -1804,30 +2075,30 @@ class AirPlusCloudDaemon:
                     else None
                 )
                 if self._client and model_id is None:
-                    print(json.dumps({
+                    _emit({
                         "type": "warning",
                         "event": "airplus_model_unknown",
                         "message": "Air+ model is unknown; using the generic "
                                    "mode mapping for this command",
-                    }), flush=True)
+                    })
                 if _airplus_mode_to_dcode(mode, model_id) is None:
                     raise ValueError(f"Invalid mode: {mode}")
                 if self._client:
-                    await asyncio.to_thread(self._client.set_values, {"mode": mode})
+                    await self._set_values({"mode": mode})
                 return {"mode": mode}
             raise Exception("No args provided for mode command")
         elif cmd == "light":
             if args:
                 level = int(args[0])
                 if self._client:
-                    await asyncio.to_thread(self._client.set_values, {"light_level": level})
+                    await self._set_values({"light_level": level})
                 return {"light": level}
             raise Exception("No args provided for light command")
         elif cmd == "childlock":
             if args:
                 enabled = str(args[0]).lower() in ["on", "1", "true", "enabled"]
                 if self._client:
-                    await asyncio.to_thread(self._client.set_values, {"child_lock": enabled})
+                    await self._set_values({"child_lock": enabled})
                 return {"child_lock": enabled}
             raise Exception("No args provided for childlock command")
         else:
@@ -1909,13 +2180,18 @@ class PhilipsAirPurifier:
     async def get_status(self) -> Dict[str, Any]:
         return await self._client.get_status()
 
+    async def _set(self, key: str, value: int):
+        # set_control_value reports a device rejection by returning False.
+        if not await self._client.set_control_value(key, value):
+            raise RuntimeError(f"Device rejected {key}={value}")
+
     async def set_power(self, on: bool):
-        await self._client.set_control_value(PARAM_POWER, 1 if on else 0)
+        await self._set(PARAM_POWER, 1 if on else 0)
 
     async def set_mode(self, mode: str):
         if mode.lower() not in MODE_VALUES:
             raise ValueError(f"Invalid mode: {mode}")
-        await self._client.set_control_value(PARAM_MODE, MODE_VALUES[mode.lower()])
+        await self._set(PARAM_MODE, MODE_VALUES[mode.lower()])
 
     async def set_light(self, level: int):
         if level == 0:
@@ -1924,10 +2200,10 @@ class PhilipsAirPurifier:
             value = LIGHT_DIM
         else:
             value = LIGHT_BRIGHT
-        await self._client.set_control_value(PARAM_LIGHT, value)
+        await self._set(PARAM_LIGHT, value)
 
     async def set_child_lock(self, enabled: bool):
-        await self._client.set_control_value(PARAM_CHILD_LOCK, 1 if enabled else 0)
+        await self._set(PARAM_CHILD_LOCK, 1 if enabled else 0)
 
 
 async def handle_cli_command(host: str, command: str, *args):

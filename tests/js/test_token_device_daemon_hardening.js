@@ -46,6 +46,19 @@ test('/auth/save rejects invalid device IDs before creating files or directories
   assert.equal(mkdir.mock.callCount(), 0);
 });
 
+test('/auth/save writes into the Homebridge storage path when one is provided', async (t) => {
+  const storage = fs.mkdtempSync(path.join(os.tmpdir(), 'philips-storage-'));
+  t.after(() => {
+    fs.rmSync(storage, { recursive: true, force: true });
+    delete server.homebridgeStoragePath;
+  });
+  server.homebridgeStoragePath = storage;
+  server._tokens = { access_token: 'access', refresh_token: 'refresh', id_token: 'identity' };
+  const result = await server.routes['/auth/save']({ uuid: 'dev-1' });
+  assert.equal(result.tokenFile, path.join(storage, 'philips-airplus-dev-1.json'));
+  assert.equal(fs.statSync(result.tokenFile).mode & 0o777, 0o600);
+});
+
 test('/auth/save preserves valid device IDs and owner-only token files', async (t) => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'philips-valid-id-'));
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));
@@ -102,7 +115,12 @@ test('execute still sends commands and resolves daemon responses on writable std
     for (const { timeout } of handler.pendingRequests.values()) clearTimeout(timeout);
   });
   const command = handler.execute('status');
-  assert.deepEqual(requests, ['{"id":1,"cmd":"status","args":[]}\n']);
+  assert.equal(requests.length, 1);
+  assert.ok(requests[0].endsWith('\n'));
+  const sent = JSON.parse(requests[0]);
+  assert.deepEqual({ id: sent.id, cmd: sent.cmd, args: sent.args }, { id: 1, cmd: 'status', args: [] });
+  // The daemon drops commands that waited past the JS command timeout.
+  assert.ok(Math.abs(sent.deadline - (Date.now() + handler.commandTimeout)) < 1000);
   handler.handleMessage('{"type":"response","id":1,"success":true,"data":{"pm25":7}}');
   assert.deepEqual(await command, { pm25: 7 });
   assert.equal(handler.pendingRequests.size, 0);

@@ -5,12 +5,20 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    # Wait before proposing a new release so a compromised one is likely
+    # yanked first. Security updates are not delayed by this.
+    cooldown:
+      default-days: 7
 
   - package-ecosystem: npm
     directory: /
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    # Wait before proposing a new release so a compromised one is likely
+    # yanked first. Security updates are not delayed by this.
+    cooldown:
+      default-days: 7
     groups:
       dev-dependencies:
         patterns: ["*"]
@@ -21,3 +29,7 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    # Wait before proposing a new release so a compromised one is likely
+    # yanked first. Security updates are not delayed by this.
+    cooldown:
+      default-days: 7

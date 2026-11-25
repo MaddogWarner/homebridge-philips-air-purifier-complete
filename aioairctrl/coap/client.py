@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import os
@@ -20,6 +21,12 @@ class Client:
     STATUS_PATH = "/sys/dev/status"
     CONTROL_PATH = "/sys/dev/control"
     SYNC_PATH = "/sys/dev/sync"
+    # NON requests have no aiocoap-level timeout, so a lost reply would block
+    # forever. Bound each one-shot request, and bound a whole control call
+    # (including retries and resyncs) so it finishes inside the plugin's 15s
+    # command timeout even after a reconnect (4s lock wait + 4s connect + 6s).
+    REQUEST_TIMEOUT = 4
+    CONTROL_DEADLINE = 6
 
     def __init__(self, host, port=5683):
         self.host = host
@@ -35,12 +42,26 @@ class Client:
     @classmethod
     async def create(cls, *args, **kwargs):
         obj = cls(*args, **kwargs)
-        await obj._init()
+        try:
+            await obj._init()
+        except BaseException:
+            # Don't leak the UDP socket when the initial sync fails or times out.
+            await obj.shutdown()
+            raise
         return obj
 
     async def shutdown(self) -> None:
         if self._client_context:
             await self._client_context.shutdown()
+
+    async def _response(self, request, path):
+        try:
+            return await asyncio.wait_for(request.response, timeout=self.REQUEST_TIMEOUT)
+        except asyncio.TimeoutError:
+            raise TimeoutError(
+                f"No CoAP response from {self.host}:{self.port}{path} "
+                f"within {self.REQUEST_TIMEOUT}s"
+            ) from None
 
     async def _sync(self):
         logger.debug("syncing")
@@ -51,7 +72,7 @@ class Client:
             uri=f"coap://{self.host}:{self.port}{self.SYNC_PATH}",
             payload=sync_request.encode(),
         )
-        response = await self._client_context.request(request).response
+        response = await self._response(self._client_context.request(request), self.SYNC_PATH)
         client_key = response.payload.decode()
         if not client_key:
             raise ValueError("Sync response contained empty client key")
@@ -65,7 +86,9 @@ class Client:
             mtype=NON,
             uri=f"coap://{self.host}:{self.port}{self.STATUS_PATH}",
         )
-        response = await self._client_context.request(request).response
+        response = await self._response(
+            self._client_context.request(request), self.STATUS_PATH
+        )
         payload_encrypted = response.payload.decode()
         payload = self._encryption_context.decrypt(payload_encrypted)
         logger.debug("status: %s", payload)
@@ -88,7 +111,9 @@ class Client:
         )
         request.opt.observe = 0
         requester = self._client_context.request(request)
-        response = await requester.response
+        # Only the first response is bounded; the observation itself is
+        # long-lived and legitimately quiet between device changes.
+        response = await self._response(requester, self.STATUS_PATH)
         yield decrypt_status(response)
         async for response in requester.observation:
             yield decrypt_status(response)
@@ -99,6 +124,18 @@ class Client:
         )
 
     async def set_control_values(self, data: dict, retry_count=5, resync=True) -> bool:
+        try:
+            async with asyncio.timeout(self.CONTROL_DEADLINE) as deadline:
+                return await self._set_control_values(data, retry_count, resync)
+        except TimeoutError:
+            if deadline.expired():
+                raise TimeoutError(
+                    f"CoAP control {list(data)} not acknowledged within "
+                    f"{self.CONTROL_DEADLINE}s"
+                ) from None
+            raise
+
+    async def _set_control_values(self, data: dict, retry_count, resync) -> bool:
         state_desired = {
             "state": {
                 "desired": {
@@ -118,7 +155,9 @@ class Client:
             uri=f"coap://{self.host}:{self.port}{self.CONTROL_PATH}",
             payload=payload_encrypted.encode(),
         )
-        response = await self._client_context.request(request).response
+        response = await self._response(
+            self._client_context.request(request), self.CONTROL_PATH
+        )
         logger.debug("RESPONSE: %s", response.payload)
         result = json.loads(response.payload)
         if result.get("status") == "success":
@@ -129,6 +168,6 @@ class Client:
                 await self._sync()
             if retry_count > 0:
                 logger.debug("set_control_value failed. retrying...")
-                return await self.set_control_values(data, retry_count - 1, resync)
+                return await self._set_control_values(data, retry_count - 1, resync)
             logger.error("set_control_value failed: %s", data)
             return False

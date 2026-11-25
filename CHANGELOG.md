@@ -6,6 +6,63 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [4.3.0] — 23/11/2026
+
+### Fixed
+
+- **CoAP Auto mode:** selecting Auto on a CoAP purifier sent mode `1` instead of `0`.
+- **CoAP hangs:** CoAP requests now time out (4 s per request, 6 s per control command including
+  retries). A lost UDP reply or an offline purifier no longer blocks every later command, and an
+  offline purifier now reports "not connected" at startup within about 4 s.
+- **CoAP live updates:** a command arriving during a reconnect could permanently stop push updates.
+  The observation is now supervised and restarted, and it is renewed if the purifier sends nothing
+  for 10 minutes.
+- **Daemon restarts:** a daemon that crashed before becoming ready was restarted twice, so restart
+  chains multiplied. A daemon that hit the startup timeout was left running, and a restart pending
+  at shutdown could start a daemon after Homebridge had stopped. Each failure now triggers exactly
+  one restart, and stopped daemons are killed (SIGKILL after 5 s if needed).
+- **Air+ orphans:** the Air+ daemon now exits when Homebridge goes away, instead of staying
+  connected to the cloud.
+- **One bad device:** an invalid device entry (for example a hostname instead of an IPv4 address)
+  no longer stops the other devices from loading. The custom settings UI now validates the IP
+  address and Air+ device UUID before saving.
+- **Failed commands:** HomeKit now reverts to the previous state when a command fails, instead of
+  showing a state the purifier never reached.
+- **No Response:** the purifier and air-quality tiles show "No Response" while the device is
+  unreachable, instead of stale values.
+- **Late commands:** commands that waited too long behind a slow one are dropped instead of being
+  sent late, and every command now replies within 12 s.
+- **Mixed-up status messages:** status messages from background threads can no longer merge onto
+  one line and be lost.
+- **Air+ token handling:** token refresh is now thread-safe, refreshes only on HTTP 401 (not on any
+  network error), and refreshes before model lookups.
+- **Air+ setup wizard:**
+  - Calls to Philips now time out after 15 s instead of hanging.
+  - A redirect URL from a different login attempt is rejected.
+  - The consent-page fallback only ever contacts `accounts.home.id`.
+  - The token file is written through an exclusive, randomly named temporary file.
+- **CLI:** reports an error and a non-zero exit code when the purifier rejects a command.
+- The CoAP client key now wraps at `FFFFFFFF` instead of raising an error.
+
+### Changed
+
+- **Air+ token location:** new token files are saved in Homebridge's storage directory, so they are
+  included in Homebridge backups and survive Docker container re-creation. Existing tokens in
+  `~/.homebridge` continue to be used.
+- **Air+ serial number:** Air+ accessories use the device UUID as their serial number instead of
+  `cloud`.
+- **Python dependencies:** these are now listed in `requirements.txt`, and `paho-mqtt` is capped
+  below 3.
+- **npm package:** cut from 1.8 MB to 74 kB. It no longer ships tests, CI files or the icon.
+- **CI and security checks:**
+  - Python tests now run with their dependencies installed.
+  - `pip-audit` and Bandit now fail the build.
+  - Semgrep findings go to Code Scanning.
+  - CodeQL now covers Python.
+  - Publishing runs in a separate, pinned job with a tag-to-version check.
+
+---
+
 ## [4.2.0] — 03/11/2026
 
 ### Fixed

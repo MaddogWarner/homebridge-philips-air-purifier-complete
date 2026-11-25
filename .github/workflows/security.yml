@@ -8,37 +8,59 @@ on:
 
 permissions:
   contents: read
-  security-events: write
 
 jobs:
   security:
     name: security
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write  # Semgrep SARIF upload
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
       - name: Gitleaks
-        uses: gitleaks/gitleaks-action@v3
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.11'
 
       - name: Install audit tools
         run: pip install pip-audit bandit
 
+      # Audit the plugin's own Python dependencies, not the runner's packages.
       - name: pip-audit
-        run: pip-audit || true
+        run: pip-audit -r requirements.txt
 
+      # Scoped to shipped Python code. Skipped checks are reviewed exceptions:
+      # B310 - urlopen is only called with https:// constants or the http://
+      #        device URL the plugin builds itself; B324 - MD5 is mandated by
+      #        the Philips CoAP protocol (aioairctrl/coap/encryption.py).
       - name: Bandit SAST
-        run: bandit -r . -ll -x ./.git,./node_modules --quiet || true
+        run: bandit -r philips_air_api.py aioairctrl scripts -ll --quiet --skip B310,B324
 
+      # Findings are published to Code Scanning rather than failing the build.
+      # The MD5 rule is excluded for the same reason as Bandit's B324 above.
+      # Semgrep keeps `nosemgrep`-suppressed findings in its SARIF output and
+      # Code Scanning shows them as open, so they are filtered out before upload.
       - name: Semgrep
         run: |
           pip install semgrep
-          semgrep --config=p/default --config=p/secrets --config=p/owasp-top-ten --error --quiet || true
+          semgrep --config=p/default --config=p/secrets --config=p/owasp-top-ten \
+            --exclude-rule python.lang.security.insecure-hash-algorithms-md5.insecure-hash-algorithm-md5 \
+            --sarif --output semgrep-raw.sarif --quiet
+          jq '.runs[].results |= map(select((.suppressions // []) | length == 0))' \
+            semgrep-raw.sarif > semgrep.sarif
+
+      - name: Upload Semgrep results
+        if: always()
+        uses: github/codeql-action/upload-sarif@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep

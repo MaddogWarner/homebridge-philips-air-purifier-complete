@@ -378,7 +378,7 @@ runtime for backwards compatibility, but that field is no longer shown in the GU
 | `devices[].clientSecret` | No | — | Base64 HomeID local API client secret for PhilipsCondor challenge authentication. |
 | `devices[].encryptionKey` | No | Auto-fetched when possible | Optional hex AES key for HomeID encrypted payloads. Leave blank unless you already know it. |
 | `devices[].airplusDeviceUuid` | Yes for Air+ | — | Philips Air+ device UUID. Filled automatically by the setup wizard. |
-| `devices[].airplusTokenFile` | No | `~/.homebridge/philips-airplus-{uuid}.json` | Token file written by the setup wizard or CLI setup script. |
+| `devices[].airplusTokenFile` | No | `<Homebridge storage>/philips-airplus-{uuid}.json` (falls back to an existing `~/.homebridge/philips-airplus-{uuid}.json`) | Token file written by the setup wizard or CLI setup script. |
 | `devices[].pythonPath` | No | Auto-detected | Path to Python 3.11 or newer with `aiocoap` and `pycryptodomex` installed. Leave blank to use the plugin's bundled virtual environment. |
 | `additionalDevicesJson` | No | — | Legacy v3.1 runtime fallback. Additional entries are still merged with `devices[]`, but this field is no longer shown in the GUI. |
 
