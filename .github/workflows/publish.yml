@@ -8,8 +8,8 @@ permissions:
   contents: read
 
 jobs:
-  # Tests run in their own job without the OIDC publish permission, because
-  # they install third-party Python packages from PyPI.
+  # Tests run in their own job without the OIDC publish permission, so no
+  # third-party code runs where the publish token is available.
   test:
     runs-on: ubuntu-latest
     steps:
@@ -21,7 +21,7 @@ jobs:
         with:
           python-version: '3.11'
       - run: npm ci --ignore-scripts
-      - run: python -m pip install -r requirements.txt
+      - run: python scripts/vendor.py --check  # pip --require-hashes; fails on any difference
       - run: npm run lint
       - run: npm test
 

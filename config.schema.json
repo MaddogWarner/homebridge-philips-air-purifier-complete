@@ -22,7 +22,6 @@
             "name": {
               "title": "Name",
               "type": "string",
-              "required": true,
               "default": "Air Purifier",
               "description": "The name of this purifier as it appears in HomeKit."
             },
@@ -66,7 +65,6 @@
             "clientId": {
               "title": "HomeID Client ID",
               "type": "string",
-              "required": false,
               "x-schema-form": {
                 "type": "password"
               },
@@ -75,7 +73,6 @@
             "clientSecret": {
               "title": "HomeID Client Secret",
               "type": "string",
-              "required": false,
               "x-schema-form": {
                 "type": "password"
               },
@@ -84,7 +81,6 @@
             "encryptionKey": {
               "title": "HomeID Encryption Key",
               "type": "string",
-              "required": false,
               "x-schema-form": {
                 "type": "password"
               },
@@ -93,31 +89,28 @@
             "airplusDeviceUuid": {
               "title": "Air+ Device UUID",
               "type": "string",
-              "required": false,
               "description": "Device UUID for Philips Air+ Cloud. Filled automatically by Login with Air+."
             },
             "airplusTokenFile": {
               "title": "Air+ Token File Path",
               "type": "string",
-              "required": false,
               "placeholder": "~/.homebridge/philips-airplus-{uuid}.json",
               "description": "Path to the Air+ token file. Filled automatically by Login with Air+."
             },
             "pythonPath": {
               "title": "Python Path",
               "type": "string",
-              "required": false,
               "placeholder": "Auto-detected",
-              "description": "Optional path to Python 3.11 or newer. Leave blank to use the bundled virtual environment."
+              "description": "Optional absolute path to Python 3.11 or newer. Leave blank to auto-detect (recommended). The Environment check in Plugin Settings shows what was found."
             },
             "apiScriptPath": {
               "title": "API Script Path",
               "type": "string",
-              "required": false,
               "placeholder": "Bundled philips_air_api.py",
               "description": "Optional path to a replacement philips_air_api.py script. Leave blank for the bundled script."
             }
-          }
+          },
+          "required": ["name"]
         }
       }
     }

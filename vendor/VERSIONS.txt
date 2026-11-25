@@ -1,0 +1,2 @@
+aiocoap==0.4.17
+paho-mqtt==2.1.0

@@ -17,7 +17,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from philips_air_api import (  # noqa: E402
     AirPlusCloudClient,
     AirPlusCloudDaemon,
-    CRYPTO_AVAILABLE,
     HomeIDAESCrypto,
     PhilipsCondorAuth,
     _airplus_control_message,
@@ -480,9 +479,6 @@ class AirPlusCloudDaemonMessageTests(unittest.TestCase):
 
 class HomeIDCryptoTests(unittest.TestCase):
     def test_homeid_aes_round_trip(self):
-        if not CRYPTO_AVAILABLE:
-            self.skipTest("pycryptodomex is not installed in this Python environment")
-
         key = "00112233445566778899aabbccddeeff"
         payload = {"pwr": "1", "mode": "A"}
 

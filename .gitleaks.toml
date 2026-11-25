@@ -1,0 +1,9 @@
+# Gitleaks configuration: the default rules, plus one narrow path allowlist.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Test vectors, not secrets"
+# Randomly generated AES keys/IVs recorded as test vectors (see the "source"
+# field in the file). They protect nothing; flagging them hides real findings.
+paths = ['''^tests/fixtures/aes_vectors\.json$''']

@@ -1,7 +1,6 @@
 import hashlib
 
-from Cryptodome.Cipher import AES
-from Cryptodome.Util.Padding import pad, unpad
+from aioairctrl.aes import AES, pad, unpad
 
 # Minimum valid encrypted payload: 8 (key) + 0 (ciphertext) + 64 (digest) = 72 bytes
 _MIN_PAYLOAD_LEN = 72

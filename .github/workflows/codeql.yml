@@ -25,6 +25,11 @@ jobs:
       - uses: github/codeql-action/init@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
         with:
           languages: ${{ matrix.language }}
+          # vendor/ is unmodified third-party code (aiocoap, paho-mqtt);
+          # pip-audit and Dependabot track it through requirements.txt.
+          config: |
+            paths-ignore:
+              - vendor
       - uses: github/codeql-action/autobuild@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
       - uses: github/codeql-action/analyze@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
         with:

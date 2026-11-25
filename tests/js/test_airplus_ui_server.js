@@ -206,7 +206,7 @@ const findCall = (calls, predicate) => calls.find(predicate);
 
 // --- Tests -------------------------------------------------------------------
 
-test('registers the routes the wizard calls', () => {
+test('registers the routes the settings UI calls', () => {
   const server = new AirPlusSetupServer();
   assert.deepEqual(Object.keys(server.routes).sort(), [
     '/auth/exchange',
@@ -214,6 +214,7 @@ test('registers the routes the wizard calls', () => {
     '/auth/otp/send',
     '/auth/otp/verify',
     '/auth/save',
+    '/env/check',
   ]);
 });
 
@@ -391,4 +392,53 @@ test('the consent-page fallback never fetches a host other than accounts.home.id
     /No authorisation code/,
   );
   assert.equal(calls.length, 0);
+});
+
+// --- Environment check -------------------------------------------------------
+
+test('/env/check auto-detects a Python that loads the bundled packages', async () => {
+  const result = await instances[0].routes['/env/check']({});
+  assert.equal(result.source, 'auto');
+  assert.equal(result.ok, true);
+  assert.match(result.version, /^3\.\d+\.\d+/);
+  assert.ok(result.hint);
+});
+
+test('/env/check applies the same pythonPath validation as the plugin', async () => {
+  const route = instances[0].routes['/env/check'];
+  for (const pythonPath of ['python3; id', '$(id)', 'a`b`']) {
+    const result = await route({ pythonPath });
+    assert.equal(result.ok, false, pythonPath);
+    assert.match(result.error, /invalid characters/, pythonPath);
+  }
+});
+
+test('/env/check accepts a valid configured interpreter, by path or command name', async () => {
+  const route = instances[0].routes['/env/check'];
+  const runtime = require('../../python-runtime');
+  const pluginDir = path.join(__dirname, '..', '..');
+  const { found } = runtime.findPython(pluginDir);
+  assert.ok(found, 'expected a Python 3.11+ on this machine');
+
+  const byPath = await route({ pythonPath: found.path });
+  assert.equal(byPath.source, 'configured');
+  assert.equal(byPath.ok, true);
+  assert.equal(byPath.version, found.version);
+
+  // A command name is resolved on PATH, which may be a different interpreter
+  // from the auto-detected one, so compare with a direct check of the same name.
+  const name = path.basename(found.path);
+  const byName = await route({ pythonPath: name });
+  const direct = runtime.inspectPython(name, pluginDir);
+  assert.equal(byName.error, undefined);
+  assert.equal(byName.ok, direct.ok);
+  assert.equal(byName.version, direct.version);
+});
+
+test('/env/check reports a configured python that does not exist', async () => {
+  const result = await instances[0].routes['/env/check']({ pythonPath: path.join(os.tmpdir(), 'nope', 'python3') });
+  assert.equal(result.source, 'configured');
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /does not exist/);
+  assert.equal(result.tooOld, false);
 });

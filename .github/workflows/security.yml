@@ -54,6 +54,7 @@ jobs:
           pip install semgrep
           semgrep --config=p/default --config=p/secrets --config=p/owasp-top-ten \
             --exclude-rule python.lang.security.insecure-hash-algorithms-md5.insecure-hash-algorithm-md5 \
+            --exclude vendor \
             --sarif --output semgrep-raw.sarif --quiet
           jq '.runs[].results |= map(select((.suppressions // []) | length == 0))' \
             semgrep-raw.sarif > semgrep.sarif

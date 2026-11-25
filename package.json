@@ -1,20 +1,25 @@
 {
   "name": "homebridge-philips-air-purifier-complete",
-  "version": "4.3.0",
+  "version": "5.0.0",
   "customUi": true,
-  "description": "Homebridge plugin for Philips Air Purifier with bundled CoAP control library and Python 3.11+/Node.js 24 support",
+  "description": "Homebridge plugin for Philips Air Purifiers (CoAP, HTTP, HomeID and Air+ cloud). No install scripts: needs only Python 3.11+",
   "main": "index.js",
   "files": [
     "index.js",
+    "python-runtime.js",
     "philips_air_api.py",
     "aioairctrl/**/*.py",
+    "vendor/**/*.py",
+    "vendor/**/py.typed",
+    "vendor/LICENSES/",
+    "vendor/README.md",
+    "vendor/VERSIONS.txt",
     "homebridge-ui/",
     "scripts/*.py",
     "config.schema.json",
-    "preinstall.sh",
-    "postinstall.sh",
     "requirements.txt",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "THIRD_PARTY_NOTICES.md"
   ],
   "keywords": [
     "homebridge-plugin",
@@ -24,7 +29,7 @@
     "coap"
   ],
   "engines": {
-    "node": ">=24.0.0",
+    "node": "^22.10.0 || ^24.0.0 || ^26.0.0",
     "homebridge": ">=2.0.0"
   },
   "author": "MaddogWarner",
@@ -37,6 +42,7 @@
     "type": "git",
     "url": "git+https://github.com/MaddogWarner/homebridge-philips-air-purifier-complete.git"
   },
+  "homepage": "https://github.com/MaddogWarner/homebridge-philips-air-purifier-complete#readme",
   "bugs": {
     "url": "https://github.com/MaddogWarner/homebridge-philips-air-purifier-complete/issues"
   },
@@ -47,14 +53,10 @@
     "@eslint/js": "^10.0.1",
     "eslint": "^10.5.0",
     "globals": "^17.6.0",
+    "homebridge": "^2.0.2",
     "prettier": "^3.2.5"
   },
-  "peerDependencies": {
-    "homebridge": ">=2.0.0"
-  },
   "scripts": {
-    "preinstall": "bash preinstall.sh",
-    "postinstall": "bash postinstall.sh",
     "test": "python3 -m unittest discover -s tests && node --test tests/js/*.js",
     "lint": "eslint .",
     "format": "prettier -w ."

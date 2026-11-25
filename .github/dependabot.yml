@@ -33,3 +33,8 @@ updates:
     # yanked first. Security updates are not delayed by this.
     cooldown:
       default-days: 7
+    ignore:
+      # The bundled aiocoap monkeypatches are only validated for 0.4.x.
+      # A pin bump also needs `python3 scripts/vendor.py` (CI fails until run).
+      - dependency-name: aiocoap
+        versions: [">=0.5"]
