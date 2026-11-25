@@ -6,7 +6,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
-## [Unreleased]
+## [5.0.1] — 26/11/2026
 
 ### Fixed
 
@@ -15,6 +15,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   devices (AC0650); Air+ cloud and HTTP mappings are unchanged.
 
 ---
+
 ## [5.0.0] — 25/11/2026
 
 This is the first published release since 4.2.0, so it also includes everything listed under
