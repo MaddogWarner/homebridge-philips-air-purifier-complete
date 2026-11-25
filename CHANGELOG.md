@@ -6,6 +6,17 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **CoAP command deadline on Python 3.11:** a CoAP command could occasionally keep retrying past
+  its 6-second limit, because Python 3.11's `asyncio.wait_for` can lose the deadline's
+  cancellation when a reply arrives at the same moment. Requests now use `asyncio.timeout`. This
+  also fixes an intermittent CI failure in `test_retries_are_bounded_by_overall_deadline`.
+
+---
+
 ## [5.0.1] — 26/11/2026
 
 ### Fixed
