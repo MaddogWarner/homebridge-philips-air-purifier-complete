@@ -97,6 +97,19 @@ function wireModelControls(acc, { cachedChildLock = false } = {}) {
 const status = (power, mode) => ({ power, mode, light_level: 0, child_lock: false, pm25: 3 });
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
+test('an unrecognised CoAP manual speed is not presented as Auto in HomeKit', () => {
+  const acc = makeAccessory({ ac1715: false });
+  const { target } = wireModelControls(acc);
+  acc.updatePurifierCharacteristics = Accessory.prototype.updatePurifierCharacteristics;
+  acc.handleObserveUpdate(status(true, 'unknown'));
+  assert.equal(target.get(), acc.Characteristic.TargetAirPurifierState.MANUAL);
+  assert.equal(target.value, acc.Characteristic.TargetAirPurifierState.MANUAL);
+
+  acc.handleObserveUpdate(status(true, 'auto'));
+  assert.equal(target.get(), acc.Characteristic.TargetAirPurifierState.AUTO);
+  assert.equal(target.value, acc.Characteristic.TargetAirPurifierState.AUTO);
+});
+
 test('AC1715 LED switch follows local power changes without extra light commands', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1_000_000 });
   const acc = makeAccessory();
