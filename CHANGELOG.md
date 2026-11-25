@@ -6,7 +6,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
-## [5.0.0] — 24/11/2026
+## [5.0.0] — 25/11/2026
+
+This is the first published release since 4.2.0, so it also includes everything listed under
+4.3.0 below.
 
 Install is now zero-touch: no install scripts, no pip, no virtual environment. The only
 requirement is Python 3.11+, which most Linux-based Homebridge hosts already have.
@@ -30,11 +33,11 @@ and config option from 4.3.0 works as before.
 
 ### Changed
 
-- **Bundled dependencies:** `aiocoap` 0.4.17 and `paho-mqtt` 2.1.0 now ship in `vendor/`. They're
+- **Bundled dependencies:** `aiocoap` 0.4.17 and `paho-mqtt` 2.2.0 now ship in `vendor/`. They're
   pinned in `requirements.txt` together with the sha256 of each published wheel.
   `scripts/vendor.py` installs those wheels with `pip --require-hashes` and checks every file
   against the wheel's RECORD. CI rebuilds `vendor/` the same way and fails on any added, missing
-  or modified file. Licences, including paho-mqtt's EDL-1.0 text, are listed in
+  or modified file. Their licence texts ship in `vendor/LICENSES/` and are listed in
   `THIRD_PARTY_NOTICES.md`.
 - **pycryptodomex replaced** by a pure-Python AES-CBC (`aioairctrl/aes.py`). It's tested against
   FIPS-197 and SP 800-38A vectors, and against outputs recorded from the v4.3.0 code for CoAP

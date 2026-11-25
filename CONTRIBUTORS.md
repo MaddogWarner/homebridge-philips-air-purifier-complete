@@ -3,12 +3,15 @@
 ## Project Maintainer
 
 **[MadDogWarner](https://github.com/MadDogWarner)**
-Combined fork author. Bundled aioairctrl into the plugin, automated Python environment setup via npm postinstall, applied code quality and security fixes, authored streamlined Homebridge deployment, project versioning and maintenance.
+Combined fork author. Bundled aioairctrl into the plugin, automated Python environment setup (npm postinstall in v3–v4, replaced by zero-touch bundling in v5), applied code quality and security fixes, authored streamlined Homebridge deployment, project versioning and maintenance.
 
 ## AI Assistance
 
 **[Claude Sonnet 4.6](https://claude.ai)** (Anthropic)
 Code review of aioairctrl (bug fixes, type annotation corrections, input validation), refactoring of homebridge plugin for the bundled architecture, postinstall automation, documentation authoring. Additional contributions: daemon readline listener leak fix, removal of orphaned CoAP Observe subscription from one-shot `get_status()`, `PYTHON_MIN_VERSION` single-source-of-truth refactor across JS and shell runtimes, removal of dead `SPEED_TO_MODE` entry and residual null guard.
+
+**[Claude Opus 5.5](https://claude.ai)** (Anthropic)
+v5.0.0 zero-touch install: bundled pure-Python dependencies with hash-pinned vendoring, pure-Python AES replacing pycryptodomex, shared Python discovery and the Environment check panel, Homebridge Verified compliance, CI matrix and packaging smoke tests, and documentation.
 
 **OpenAI Codex**
 Python 3.12 and Node.js 24 compatibility review, runtime detection hardening, dependency range updates, ESLint flat config migration, and documentation updates.

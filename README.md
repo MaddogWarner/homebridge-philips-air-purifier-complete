@@ -7,6 +7,7 @@
 <p align="center">
   <a href="https://www.npmjs.com/package/homebridge-philips-air-purifier-complete"><img src="https://img.shields.io/npm/v/homebridge-philips-air-purifier-complete" alt="npm"></a>
   <a href="https://homebridge.io"><img src="https://img.shields.io/badge/homebridge-%3E%3D2.0.0-blue" alt="Homebridge"></a>
+  <a href="https://nodejs.org"><img src="https://img.shields.io/badge/node-22%20%7C%2024%20%7C%2026-green" alt="Node.js 22, 24, 26"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
 </p>
 
@@ -28,9 +29,10 @@ For security reporting and known protocol limitations, see [SECURITY.md](SECURIT
 - **Child Lock** — Lock or unlock physical controls on the device
 - **HEPA Filter Status** — Filter life percentage and change alert
 - **Pre-Filter Status** — Cleanup cycle percentage and change alert
-- **HTTP Protocol Support** — Supports AC1xxx-series DH/AES HTTP models (e.g. AC1715) and HomeID/Condor local HTTP devices
-- **Real-time Updates** — CoAP Observe push updates (AC2xxx+) or 10-second HTTP polling (HTTP/HomeID)
+- **Four protocols** — Local CoAP, local HTTP DH/AES (AC1xxx), HomeID/Condor local HTTP(S), and Philips Air+ cloud, mixed freely in one platform
+- **Real-time Updates** — CoAP Observe push updates (AC2xxx+), Air+ cloud MQTT, or 10-second HTTP polling (HTTP/HomeID)
 - **Auto-reconnect** — Daemon restarts automatically with exponential backoff if the device drops off
+- **Zero-touch install** — No install scripts, pip or virtual environment; an Environment panel in Plugin Settings checks Python for you
 
 ### Compared with other Philips plugins
 
@@ -102,81 +104,43 @@ process; Homebridge normally sees the same Python unless it runs with a differen
 npm install -g homebridge-philips-air-purifier-complete
 ```
 
-No install step runs. Upgrading from v4.x leaves nothing behind, because the old `.venv` lived
-inside the plugin folder and npm replaces that folder.
+No install step runs.
 
 ---
 
-## Migrating from v2.x to v3.0.0
+## Upgrading
 
-v3.0.0 changes the plugin type from `accessory` to `platform`. Update your Homebridge
-`config.json` before restarting Homebridge.
+### From v4.x to v5.0.0
 
-1. Move device entries from `"accessories"` into `"platforms"[0]."devices"`:
+- Nothing to install. The plugin no longer creates a `.venv`, and npm removes the old one
+  when it replaces the plugin folder. You need Python 3.11+ on the host (see
+  [Prerequisites](#prerequisites)); the **Environment** panel confirms it.
+- `PHILIPS_AIR_SKIP_PYTHON_PREINSTALL`, npm's `--python` option and
+  `PHILIPS_AIR_ALLOW_LEGACY_ACCESSORY` no longer exist.
+- If you set a custom `apiScriptPath`, it now needs the plugin's `aioairctrl/` and `vendor/`
+  folders beside it. Leave it blank unless you maintain your own script.
 
-   **Before: v2.x accessory config**
+See [CHANGELOG.md](CHANGELOG.md) for everything in 5.0.0.
 
-   ```json
-   {
-     "accessories": [
-       {
-         "name": "Air Purifier",
-         "host": "192.168.1.17",
-         "accessory": "PhilipsAirPurifier"
-       }
-     ]
-   }
-   ```
+### From an `accessories[]` config (v2.x)
 
-   **After: v3.x platform config**
+v3.0.0 moved the plugin from `accessories` to `platforms`, and v5.0.0 removed the old accessory
+entirely. If Homebridge logs `No plugin was found for the accessory "PhilipsAirPurifier"`, an old
+entry is still in the top-level `"accessories"` array of `config.json`, even if this plugin's
+settings only show `{ "platform": "PhilipsAirPurifier" }`. Homebridge keeps running.
 
-   ```json
-   {
-     "platforms": [
-       {
-         "platform": "PhilipsAirPurifier",
-         "name": "Philips Air Purifiers",
-         "devices": [
-           {
-             "name": "Air Purifier",
-             "host": "192.168.1.17"
-           }
-         ]
-       }
-     ]
-   }
-   ```
-
-2. Remove the `"accessory": "PhilipsAirPurifier"` key from each device entry.
-
-3. Restart Homebridge.
-
-From v5.0.0 the plugin no longer registers an accessory at all (it was already disabled by
-default from v3.2.3), and the `PHILIPS_AIR_ALLOW_LEGACY_ACCESSORY` rollback has been removed.
-If Homebridge logs `No plugin was found for the accessory "PhilipsAirPurifier"`, an old entry is
-still in the top-level `"accessories"` array of `config.json`, even if this plugin's settings
-only show `{ "platform": "PhilipsAirPurifier" }`. Homebridge keeps running. Delete that old
-object and keep the device under `"platforms"[]."devices"`.
-
-### Migration examples
-
-#### CoAP device
-
-**Before:**
+Move each old entry into `devices[]` and drop its `"accessory"` key. Every other field
+(`host`, `protocol`, `clientId`, `airplusDeviceUuid` and so on) carries over unchanged:
 
 ```json
 {
   "accessories": [
-    {
-      "accessory": "PhilipsAirPurifier",
-      "name": "Bedroom",
-      "host": "192.168.1.100"
-    }
+    { "accessory": "PhilipsAirPurifier", "name": "Bedroom", "host": "192.168.1.100" }
   ]
 }
 ```
 
-**After:**
+becomes
 
 ```json
 {
@@ -184,103 +148,14 @@ object and keep the device under `"platforms"[]."devices"`.
     {
       "platform": "PhilipsAirPurifier",
       "name": "Philips Air Purifiers",
-      "devices": [
-        {
-          "name": "Bedroom",
-          "host": "192.168.1.100"
-        }
-      ]
+      "devices": [{ "name": "Bedroom", "host": "192.168.1.100" }]
     }
   ]
 }
 ```
 
-#### HTTP or HomeID device
-
-**Before:**
-
-```json
-{
-  "accessories": [
-    {
-      "accessory": "PhilipsAirPurifier",
-      "name": "Study",
-      "host": "192.168.1.102",
-      "protocol": "homeid-http",
-      "useHttps": true,
-      "clientId": "BASE64_CLIENT_ID",
-      "clientSecret": "BASE64_CLIENT_SECRET"
-    }
-  ]
-}
-```
-
-**After:**
-
-```json
-{
-  "platforms": [
-    {
-      "platform": "PhilipsAirPurifier",
-      "name": "Philips Air Purifiers",
-      "devices": [
-        {
-          "name": "Study",
-          "host": "192.168.1.102",
-          "protocol": "homeid-http",
-          "useHttps": true,
-          "clientId": "BASE64_CLIENT_ID",
-          "clientSecret": "BASE64_CLIENT_SECRET"
-        }
-      ]
-    }
-  ]
-}
-```
-
-#### Air+ cloud device
-
-**Before:**
-
-```json
-{
-  "accessories": [
-    {
-      "accessory": "PhilipsAirPurifier",
-      "name": "Air Purifier (Air+)",
-      "host": "cloud",
-      "protocol": "airplus-cloud",
-      "airplusDeviceUuid": "AIRPLUS_DEVICE_UUID",
-      "airplusTokenFile": "/home/homebridge/.homebridge/philips-airplus-AIRPLUS_DEVICE_UUID.json"
-    }
-  ]
-}
-```
-
-**After:**
-
-```json
-{
-  "platforms": [
-    {
-      "platform": "PhilipsAirPurifier",
-      "name": "Philips Air Purifiers",
-      "devices": [
-        {
-          "name": "Air Purifier (Air+)",
-          "host": "cloud",
-          "protocol": "airplus-cloud",
-          "airplusDeviceUuid": "AIRPLUS_DEVICE_UUID",
-          "airplusTokenFile": "/home/homebridge/.homebridge/philips-airplus-AIRPLUS_DEVICE_UUID.json"
-        }
-      ]
-    }
-  ]
-}
-```
-
-**Note:** HomeKit will treat migrated devices as new accessories. Re-add them to rooms,
-scenes, and automations in the Home app.
+HomeKit treats migrated devices as new accessories, so re-add them to rooms, scenes and
+automations in the Home app.
 
 ---
 
@@ -348,9 +223,9 @@ For HomeID/Condor local HTTP devices:
 }
 ```
 
-Use the Homebridge plugin configuration form to add, edit, or remove CoAP, HTTP, HomeID, and
-Air+ cloud devices. The form presents `devices[]` as one tab per purifier, with protocol-specific
-fields shown only when they apply.
+Use **Plugin Settings** in the Homebridge UI to add, edit or remove CoAP, HTTP, HomeID and Air+
+cloud devices. Each purifier gets a card, with protocol-specific fields shown only when they
+apply, and the settings are checked before saving.
 
 Air+ cloud devices also need an account token. Open **Plugin Settings**, enter the Philips account
 email, complete the verification code flow, select the device, then review the new Air+ card and
@@ -394,12 +269,8 @@ If your device shows `Network error: NetworkError` on every command, try setting
 
 ## Air+ Cloud Setup (AC0650, AC1715)
 
-> **Breaking change for existing Air+ users:** After upgrading to 4.0.0, run setup once more for
-> each purifier before restarting Homebridge — either the Homebridge UI wizard below or
-> `scripts/airplus_setup.py`. Existing token files do not contain the required `id_token`.
->
-> On 4.0.0 the UI wizard could not complete the login and wrote token files without the
-> `id_token`. Use 4.0.1 or newer if you are setting up from the Homebridge UI.
+> **Coming from a version before 4.0.1?** Run setup once more for each purifier. Older token
+> files don't contain the `id_token` the cloud connection now needs.
 
 ### Quick Setup (Homebridge UI — recommended)
 
@@ -424,9 +295,9 @@ the desktop deep-link mismatch that can produce `invalid_grant` errors.
 > work but no email arrives, use your real Philips account email or the
 > **Advanced: log in via browser** fallback. See Troubleshooting.
 
-Deleting an Air+ device from the Homebridge form removes it from the Homebridge config only. The
-token file is intentionally left on disk at `~/.homebridge/philips-airplus-{uuid}.json` so an
-accidental delete does not revoke local setup state. Remove that file manually if you are cleaning
+Deleting an Air+ device from Plugin Settings removes it from the Homebridge config only. The
+token file (`philips-airplus-{uuid}.json` in the Homebridge storage directory) is intentionally
+left on disk so an accidental delete does not revoke local setup state. Remove that file manually if you are cleaning
 up an Air+ device permanently.
 
 ### Advanced / Headless Setup (SSH)
@@ -494,11 +365,12 @@ philips_air_api.py  ─── aioairctrl/ ──► aiocoap (vendor/) ──► 
     │
     ├──────────────────── DH/AES HTTP polling ──────────────► Philips device (HTTP)
     │
-    └──────────────────── HomeID HTTP/HTTPS polling ────────► Philips device (HomeID)
+    ├──────────────────── HomeID HTTP/HTTPS polling ────────► Philips device (HomeID)
     │
-    │  CoAP Observe (push)
-    │  ≈ every 30s or on change
-    │  HTTP polling every 10s
+    └──────────────────── paho-mqtt (vendor/) ──────────────► Philips Air+ cloud (MQTT)
+    │
+    │  CoAP Observe (push) ≈ every 30s or on change
+    │  Air+ MQTT push · HTTP/HomeID polling every 10s
     ▼
 State cache ──► HomeKit characteristics
 ```
@@ -509,6 +381,8 @@ State cache ──► HomeKit characteristics
 - Commands (power, mode, light) are sent directly and complete in ~100–300ms
 - The Node.js plugin communicates with the daemon over stdin/stdout JSON
 - If the daemon exits for any reason, Homebridge restarts it with exponential backoff (5s → 10s → 30s → 60s)
+- The daemon runs on the host's own Python. Its only third-party packages (`aiocoap`, `paho-mqtt`) are
+  bundled in `vendor/` and take precedence over any system copies; AES is pure Python (`aioairctrl/aes.py`)
 
 ---
 
@@ -541,11 +415,12 @@ python3 philips_air_api.py 192.168.1.100 childlock off
 - Run the connectivity check above
 - Check Homebridge logs for daemon error messages
 
-**Log says `Python 3.11+ was not found`**
-- Open **Plugin Settings**. The **Environment** panel shows what was checked and the fix for your OS
+**Log says `No usable Python 3.11+ was found`**
+- Open **Plugin Settings**. The **Environment** panel shows each Python it checked, why it was
+  rejected (for example too old), and the fix for your OS
 - Install Python 3.11+ (see [Prerequisites](#prerequisites)), then restart Homebridge
-- If Python is installed somewhere the plugin doesn't look, set **Python Path** on the device (an
-  absolute path such as `/usr/local/bin/python3.12`) or the `PHILIPS_AIR_PYTHON` environment variable
+- If Python is installed somewhere the plugin doesn't look, set **Python Path** on the device (for
+  example `/usr/local/bin/python3.12`) or the `PHILIPS_AIR_PYTHON` environment variable
 
 **Persistent CoAP timeouts**
 - CoAP (UDP) can be blocked by some network configurations; ensure UDP is allowed between Homebridge and the device
@@ -559,6 +434,20 @@ python3 philips_air_api.py 192.168.1.100 childlock off
 - If you use an Apple Private Relay / "Hide My Email" address (`*@privaterelay.appleid.com`), the code email may be silently dropped. Apple only forwards mail to a *Sign in with Apple* relay address from sender domains Philips has registered with Apple; Philips' OTP sender is not guaranteed to be registered, so the email bounces before it reaches you.
 - Workarounds: (a) use the real email address behind your Philips account instead of the relay address; (b) check whether a standalone iCloud+ "Hide My Email" alias (which forwards from any sender) receives the code; or (c) use the **Advanced: log in via browser** fallback flow.
 - This is an Apple/Philips delivery limitation — the plugin passes your email straight to Philips and cannot change how the code is sent.
+
+---
+
+## Development
+
+```bash
+npm install                          # dev tools only; the plugin itself has no build step
+npm run lint                         # ESLint
+npm test                             # Python unit tests + Node tests (needs Python 3.11+)
+python3 scripts/vendor.py --check    # rebuild vendor/ from the hash-pinned wheels and diff it
+```
+
+To change a bundled Python dependency, edit its pin and wheel hash in `requirements.txt`, then
+run `python3 scripts/vendor.py`. Never edit `vendor/` by hand; CI fails on any difference.
 
 ---
 
