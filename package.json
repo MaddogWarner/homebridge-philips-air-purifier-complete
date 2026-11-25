@@ -1,6 +1,6 @@
 {
   "name": "homebridge-philips-air-purifier-complete",
-  "version": "5.0.0",
+  "version": "5.0.1",
   "customUi": true,
   "description": "Homebridge plugin for Philips Air Purifiers (CoAP, HTTP, HomeID and Air+ cloud). No install scripts: needs only Python 3.11+",
   "main": "index.js",
